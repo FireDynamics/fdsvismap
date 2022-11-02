@@ -32,7 +32,7 @@ class VisMap:
     def set_start_point(self, x, y):
         self.start_point = (x, y)
 
-    def set_way_point(self, x, y, c=3, ior=None):
+    def set_waypoint(self, x, y, c=3, ior=None):
         '''
         :param x: X coordinate of waypoint referring to global FDS coordinates
         :param y: Y coordinate of waypoint referring to global FDS coordinates
@@ -81,7 +81,7 @@ class VisMap:
                 mean_extco_array[i, j] = mean_extco
         return mean_extco_array
 
-    def _get_distance_array(self, waypoint_id):
+    def _get_dist_array(self, waypoint_id):
         '''
         :param ref_point: point of interest
         :return: array containing distances to ref_point
@@ -92,12 +92,10 @@ class VisMap:
         self.xv, self.yv = np.meshgrid(self.all_x_coords, self.all_y_coords)
         distance_array = np.sqrt((self.xv - x)**2 + (self.yv - y)**2)
         self.distance_array_list.append(distance_array)
-        # plt.imshow(distance_array)
-        # plt.show()
         return distance_array
 
     def _get_view_array(self, waypoint_id):
-        distance_array = self._get_distance_array(waypoint_id)
+        distance_array = self._get_dist_array(waypoint_id)
         waypoint = self._get_waypoint_parameters(waypoint_id)
         x = waypoint[0]
         y = waypoint[1]
@@ -111,8 +109,6 @@ class VisMap:
                 view_angle_array = abs((self.yv - y) / distance_array)
         else:
             view_angle_array = np.ones_like(distance_array)
-        # plt.imshow(view_angle_array)
-        # plt.show()
 
         #  set visibility to zero on all cells that are behind the waypoint and against view direction
         if ior == -1:
@@ -128,7 +124,7 @@ class VisMap:
         self.view_array_list.append(view_array)
         return view_array
 
-    def _get_colission_array(self, waypoint_id, z):
+    def _get_col_array(self, waypoint_id, z):
         waypoint = self._get_waypoint_parameters(waypoint_id)
         x_start = waypoint[0]
         y_start = waypoint[1]
@@ -165,8 +161,6 @@ class VisMap:
         self.colission_array_list.append(final.T)
         return final.T
 
-
-
     def _get_vismap(self, waypoint_id, timestep):
         waypoint = self._get_waypoint_parameters(waypoint_id)
         mean_extco_array = self._get_mean_extco_array(waypoint_id, timestep)
@@ -175,8 +169,7 @@ class VisMap:
         vismap = np.where(vis_array > self.max_vis, self.max_vis, vis_array).astype(float)
         return vismap
 
-    def get_boolean_vismap(self, waypoint_id, timestep, extinction=True, viewangle=True, colission=True):
-        z = 0 # TODO: Remove hardcoding
+    def get_bool_vismap(self, waypoint_id, timestep, extinction=True, viewangle=True, colission=True, z=2):#TODO: make z value changable
         if viewangle == True:
             view_array = self._get_view_array(waypoint_id)
         else:
@@ -185,9 +178,9 @@ class VisMap:
             vismap = self._get_vismap(waypoint_id, timestep)
         else:
             vismap = self.max_vis
-        distance_array = self._get_distance_array(waypoint_id)
+        distance_array = self._get_dist_array(waypoint_id)
         if colission == True:
-            colission_array = self._get_colission_array(waypoint_id, z)
+            colission_array = self._get_col_array(waypoint_id, z)
         else:
             colission_array = 1
         vismap_total = view_array * vismap * colission_array
@@ -195,20 +188,20 @@ class VisMap:
         delta_map = np.where(vismap_total < self.min_vis, False, delta_map)
         return delta_map
 
-    def get_absolute_boolean_vismap(self, timestep, extinction=True, viewangle=True):
+    def get_abs_bool_vismap(self, timestep, extinction=True, viewangle=True):
         boolean_vismap_list = []
         for waypoint_id, waypoint in enumerate(self.way_points_list):
-            boolean_vismap = self.get_boolean_vismap(waypoint_id, timestep, extinction=extinction, viewangle=viewangle)
+            boolean_vismap = self.get_bool_vismap(waypoint_id, timestep, extinction=extinction, viewangle=viewangle)
             boolean_vismap_list.append(boolean_vismap)
             absolute_boolean_vismap = np.logical_or.reduce(boolean_vismap_list)
             self.absolute_boolean_vismap_dict[timestep] = absolute_boolean_vismap
         return absolute_boolean_vismap
 
-    def get_time_agglomerated_absolute_boolean_vismap(self):
+    def get_time_aggl_abs_bool_vismap(self):
         self.time_agglomerated_absolute_boolean_vismap = np.logical_and.reduce(list(self.absolute_boolean_vismap_dict.values()))
         return self.time_agglomerated_absolute_boolean_vismap
 
-    def plot_absolute_boolean_vismap(self): # Todo: is duplicate of plot_time_agglomerated_absolute_boolean_vismap
+    def plot_abs_bool_vismap(self): # Todo: is duplicate of plot_time_agglomerated_absolute_boolean_vismap
         # if self.time_agglomerated_absolute_boolean_vismap == None:
         #     self.get_time_agglomerated_absolute_boolean_vismap()
         extent = (self.all_x_coords[0], self.all_x_coords[-1], self.all_y_coords[-1], self.all_y_coords[0])
@@ -226,7 +219,7 @@ class VisMap:
     def add_background_image(self, file):
         self.background_image = plt.imread(file)
 
-    def plot_time_agglomerated_absolute_boolean_vismap(self):
+    def plot_time_aggl_abs_bool_vismap(self):
         # if self.time_agglomerated_absolute_boolean_vismap == None:
         #     self.get_time_agglomerated_absolute_boolean_vismap()
         extent = (self.all_x_coords[0], self.all_x_coords[-1], self.all_y_coords[-1], self.all_y_coords[0])
@@ -246,6 +239,4 @@ class VisMap:
             plt.annotate(f"WP : {wp_id:>}\nC : {c:>}\nIOR : {ior}", xy=(x+0.3, y+1.5),  bbox=dict(boxstyle="round", fc="w"), fontsize=6)
         plt.xlabel("X / m")
         plt.ylabel("Y / m")
-        plt.xlim(0, 20)
-        plt.ylim(10, 0)
         plt.show()
