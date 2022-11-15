@@ -133,14 +133,14 @@ class VisMap:
         extco_array = self._get_extco_array(0)
         obst_array = np.zeros_like(extco_array)
         for obst in self.obstructions:
-            _, x_extend, y_extend, z_extend = obst.bounding_box
-            if z_extend[0] <= z <= z_extend[1]:
-                x_i_min = (np.abs(self.all_x_coords - x_extend[0])).argmin()
-                x_i_max = (np.abs(self.all_x_coords - x_extend[1])).argmin()
-                y_i_min = (np.abs(self.all_y_coords - y_extend[0])).argmin()
-                y_i_max = (np.abs(self.all_y_coords - y_extend[1])).argmin()
-                obst_array[x_i_min:x_i_max, y_i_min:y_i_max] = True
-        obst_array[90:100, 30:44] = 0
+            for sub_obst in obst:
+                _, x_extend, y_extend, z_extend = sub_obst.extent
+                if z_extend[0] <= z <= z_extend[1]:
+                    x_i_min = (np.abs(self.all_x_coords - x_extend[0])).argmin()
+                    x_i_max = (np.abs(self.all_x_coords - x_extend[1])).argmin()
+                    y_i_min = (np.abs(self.all_y_coords - y_extend[0])).argmin()
+                    y_i_max = (np.abs(self.all_y_coords - y_extend[1])).argmin()
+                    obst_array[x_i_min:x_i_max, y_i_min:y_i_max] = True
         obst_array = np.flip(obst_array, axis=1)
         final = np.zeros_like(obst_array)
         b = final.copy()
