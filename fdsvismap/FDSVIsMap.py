@@ -5,6 +5,7 @@ import matplotlib.colors
 
 import fdsreader as fds
 from .helper_functions import find_closest_point
+from .Waypoint import Waypoint
 
 class VisMap:
     """
@@ -58,14 +59,14 @@ class VisMap:
         self.time_agglomerated_absolute_boolean_vismap = None
         self._read_fds_data()
 
-    def _get_waypoint_parameters(self, waypoint_id):
+    def _get_waypoint(self, waypoint_id):
         """
         Retrieve the parameters for a specific waypoint by its ID.
 
         :param waypoint_id: The ID of the waypoint.
         :type waypoint_id: int
-        :return: The waypoint parameters.
-        :rtype: tuple
+        :return: Waypoint object.
+        :rtype: Waypoint
         """
         return self.way_points_list[waypoint_id]
 
@@ -93,7 +94,7 @@ class VisMap:
         :param ior: Orientation of the exit sign according to FDS orientations.
         :type ior: int or None, optional
         """
-        self.way_points_list.append((x, y, c, ior))
+        self.way_points_list.append(Waypoint(x, y, c, ior))
 
     def _read_fds_data(self, quantity='OD_C0.9H0.1', slice=None): #: Todo: specify slice closest to given height
         """
@@ -138,12 +139,10 @@ class VisMap:
         :return: Array of mean extinction coefficients.
         :rtype: np.ndarray
         """
-        waypoint = self._get_waypoint_parameters(waypoint_id)
-        x = waypoint[0]
-        y = waypoint[1]
-        extco_array = self._get_extco_array(timestep)
-        i_ref = find_closest_point(self.all_x_coords, x)
-        j_ref = find_closest_point(self.all_y_coords, y)
+        wp = self._get_waypoint(waypoint_id)
+        extco_array = self._get_extco_array(time)
+        i_ref = find_closest_point(self.all_x_coords, wp.x)
+        j_ref = find_closest_point(self.all_y_coords, wp.y)
         mean_extco_array = np.zeros_like(extco_array)
         for i, x in enumerate(self.all_x_coords):
             for j, y in enumerate(self.all_y_coords):
@@ -164,9 +163,7 @@ class VisMap:
         :return: Array of distances.
         :rtype: np.ndarray
         """
-        waypoint = self._get_waypoint_parameters(waypoint_id)
-        x = waypoint[0]
-        y = waypoint[1]
+        wp = self._get_waypoint(waypoint_id)
         self.xv, self.yv = np.meshgrid(self.all_x_coords, self.all_y_coords)
         distance_array = np.sqrt((self.xv - x)**2 + (self.yv - y)**2)
         self.distance_array_list.append(distance_array)
@@ -182,29 +179,26 @@ class VisMap:
         :rtype: np.ndarray
         """
         distance_array = self._get_dist_array(waypoint_id)
-        waypoint = self._get_waypoint_parameters(waypoint_id)
-        x = waypoint[0]
-        y = waypoint[1]
-        ior = waypoint[3]
+        wp = self._get_waypoint(waypoint_id)
 
         # calculate cosinus for every cell from total distance and x / y distance
-        if self.view_angle == True and ior != None:
-            if ior == 1 or ior == -1:
-                view_angle_array = abs((self.xv - x) / distance_array)
-            elif ior == 2 or ior == -2:
-                view_angle_array = abs((self.yv - y) / distance_array)
+        if self.view_angle == True and wp.ior != None:
+            if wp.ior == 1 or wp.ior == -1:
+                view_angle_array = abs((self.xv - wp.x) / distance_array)
+            elif wp.ior == 2 or wp.ior == -2:
+                view_angle_array = abs((self.yv - wp.y) / distance_array)
         else:
             view_angle_array = np.ones_like(distance_array)
 
         #  set visibility to zero on all cells that are behind the waypoint and against view direction
-        if ior == -1:
-            view_array = np.where(self.xv < x, view_angle_array, 0)
-        elif ior == 1:
-            view_array = np.where(self.xv > x, view_angle_array, 0)
-        elif ior == -2:
-            view_array = np.where(self.yv < y, view_angle_array, 0)
-        elif ior == 2:
-            view_array = np.where(self.yv > y, view_angle_array, 0)
+        if wp.ior == -1:
+            view_array = np.where(self.xv < wp.x, view_angle_array, 0)
+        elif wp.ior == 1:
+            view_array = np.where(self.xv > wp.x, view_angle_array, 0)
+        elif wp.ior == -2:
+            view_array = np.where(self.yv < wp.y, view_angle_array, 0)
+        elif wp.ior == 2:
+            view_array = np.where(self.yv > wp.y, view_angle_array, 0)
         else:
             view_array = view_angle_array
         self.view_array_list.append(view_array)
@@ -221,11 +215,9 @@ class VisMap:
         :return: Boolean array describing if the waypoint is visible from a certain cell.
         :rtype: np.ndarray
         """
-        waypoint = self._get_waypoint_parameters(waypoint_id)
-        x_start = waypoint[0]
-        y_start = waypoint[1]
-        i_ref = find_closest_point(self.all_x_coords, x_start)
-        j_ref = find_closest_point(self.all_y_coords, y_start)
+        wp = self._get_waypoint(waypoint_id)
+        i_ref = find_closest_point(self.all_x_coords, wp.x)
+        j_ref = find_closest_point(self.all_y_coords, wp.y)
         extco_array = self._get_extco_array(0)
         obst_array = np.zeros_like(extco_array)
         for obst in self.obstructions:
@@ -268,10 +260,9 @@ class VisMap:
         :return: Visibility map.
         :rtype: np.ndarray
         """
-        waypoint = self._get_waypoint_parameters(waypoint_id)
+        wp = self._get_waypoint(waypoint_id)
         mean_extco_array = self._get_mean_extco_array(waypoint_id, timestep)
-        c = waypoint[2]
-        vis_array = c / mean_extco_array.T
+        vis_array = wp.c / mean_extco_array.T
         vismap = np.where(vis_array > self.max_vis, self.max_vis, vis_array).astype(float)
         return vismap
 
@@ -382,15 +373,13 @@ class VisMap:
         cmap = matplotlib.colors.ListedColormap(['red', 'green'])
 
         plt.imshow(self.time_agglomerated_absolute_boolean_vismap, cmap=cmap, extent=extent, alpha=0.5)
-        x, y, _, _ = zip(*self.way_points_list)
-        plt.plot((self.start_point[0], *x),(self.start_point[1], *y), color='darkgreen', linestyle='--')
-        plt.scatter((self.start_point[0], *x),(self.start_point[1], *y), color='darkgreen')
-        for wp_id, waypoint in enumerate(self.way_points_list):
-            x = waypoint[0]
-            y = waypoint[1]
-            c = waypoint[2]
-            ior = waypoint[3]
-            plt.annotate(f"WP : {wp_id:>}\nC : {c:>}\nIOR : {ior}", xy=(x+0.3, y+1.5),  bbox=dict(boxstyle="round", fc="w"), fontsize=6)
+        x_values = [wp.x for wp in self.way_points_list]
+        y_values = [wp.y for wp in self.way_points_list]
+
+        plt.plot((self.start_point[0], *x_values),(self.start_point[1], *y_values), color='darkgreen', linestyle='--')
+        plt.scatter((self.start_point[0], *x_values),(self.start_point[1], *y_values), color='darkgreen')
+        for wp_id, wp in enumerate(self.way_points_list):
+            plt.annotate(f"WP : {wp_id:>}\nC : {wp.c:>}\nIOR : {wp.ior}", xy=(wp.x+0.3, wp.y+1.5),  bbox=dict(boxstyle="round", fc="w"), fontsize=6)
         plt.xlabel("X / m")
         plt.ylabel("Y / m")
         plt.show()
