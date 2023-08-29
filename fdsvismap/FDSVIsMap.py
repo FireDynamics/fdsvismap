@@ -4,10 +4,42 @@ import matplotlib.pyplot as plt
 import matplotlib.colors
 
 import fdsreader as fds
-from .helper_functions import *
+from .helper_functions import find_closest_point
 
 class VisMap:
-    def __init__(self, sim_dir, min_vis=0, max_vis=30):
+    """
+    A class to represent a Visibility Map (VisMap) based on Fire Dynamics Simulator (FDS) data.
+
+    :ivar sim_dir: The directory containing the simulation data.
+    :vartype sim_dir: str
+    :ivar slc: Slice object for visibility calculations. Initialized as None.
+    :vartype slc: object
+    :ivar start_point: The starting point for the path. Initialized as None.
+    :vartype start_point: tuple
+    :ivar way_points_list: List of waypoints for the path. Initialized as an empty list.
+    :vartype way_points_list: list
+    :ivar mean_extco_array_list: List of mean extinction coefficient arrays. Initialized as an empty list.
+    :vartype mean_extco_array_list: list
+    :ivar view_array_list: List of view arrays. Initialized as an empty list.
+    :vartype view_array_list: list
+    :ivar distance_array_list: List of distance arrays. Initialized as an empty list.
+    :vartype distance_array_list: list
+    :ivar vis_map_array: The array representing the visibility map. Initialized as None.
+    :vartype vis_map_array: np.ndarray
+    """
+    def __init__(self, sim_dir, min_vis=0, max_vis=30, eval_height=2):
+        """
+        Initialize the VisMap object.
+
+        :param sim_dir: The directory containing the simulation data.
+        :type sim_dir: str
+        :param min_vis: The minimum visibility value. Default is 0.
+        :type min_vis: float, optional
+        :param max_vis: The maximum visibility value. Default is 30.
+        :type max_vis: float, optional
+        :param eval_height: The height at which to evaluate visibility. Default is 2.
+        :type eval_height: float, optional
+        """
         self.sim_dir = sim_dir
         self.slc = None
         self.start_point = None
@@ -27,27 +59,43 @@ class VisMap:
         self._read_fds_data()
 
     def _get_waypoint_parameters(self, waypoint_id):
+        """
+        Retrieve the parameters for a specific waypoint by its ID.
+
+        :param waypoint_id: The ID of the waypoint.
+        :type waypoint_id: int
+        :return: The waypoint parameters.
+        :rtype: tuple
+        """
         return self.way_points_list[waypoint_id]
 
     def set_start_point(self, x, y):
         self.start_point = (x, y)
 
     def set_waypoint(self, x, y, c=3, ior=None):
-        '''
-        :param x: X coordinate of waypoint referring to global FDS coordinates
-        :param y: Y coordinate of waypoint referring to global FDS coordinates
-        :param c: Contrast factor for exit sign according to JIN
-        :param ior: Orientation of the exit sign according to FDS orientations
-        :return: adds waypoint to self.way_points_list
-        '''
+        """
+        Add a waypoint to the list.
+
+        :param x: X coordinate of the waypoint referring to global FDS coordinates.
+        :type x: float
+        :param y: Y coordinate of the waypoint referring to global FDS coordinates.
+        :type y: float
+        :param c: Contrast factor for exit sign according to JIN.
+        :type c: int, optional
+        :param ior: Orientation of the exit sign according to FDS orientations.
+        :type ior: int or None, optional
+        """
         self.way_points_list.append((x, y, c, ior))
 
-    def _read_fds_data(self, quantity='OD_C0.9H0.1', slice=None): #: Todo: specify slice
-        '''
-        :param quantity: Quantity of FDS slice file to be evaluated
-        :param slice: Index of FDS slice file to be evaluated
-        :return:
-        '''
+    def _read_fds_data(self, quantity='OD_C0.9H0.1', slice=None): #: Todo: specify slice closest to given height
+        """
+        Read FDS data and store relevant slices and obstructions.
+
+        :param quantity: Quantity of FDS slice file to be evaluated.
+        :type quantity: str
+        :param slice: Index of FDS slice file to be evaluated.
+        :type slice: int
+        """
         quantity = 'ext_coef_C0.9H0.1'
         # quantity = 'VIS_C0.9H0.1'
         sim = fds.Simulation(self.sim_dir)
@@ -57,13 +105,31 @@ class VisMap:
         self.all_x_coords = self.slc.coordinates["x"]
         self.all_y_coords = self.slc.coordinates["y"]
 
-    def _get_extco_array(self, timestep):
-        time_index = self.slc.get_nearest_timestep(timestep)
+    def _get_extco_array(self, time):
+        """
+        Get the array of extinction coefficients at a given time.
+
+        :param time: Timestep to evaluate.
+        :type time: float
+        :return: Array of extinction coefficients at the specified time.
+        :rtype: np.ndarray
+        """
+        time_index = self.slc.get_nearest_timestep(time)
         data = self.slc.to_global_nonuniform()[time_index]
         extco_array = data
         return extco_array
 
-    def _get_mean_extco_array(self, waypoint_id, timestep):
+    def _get_mean_extco_array(self, waypoint_id, time):
+        """
+        Get the array of mean extinction coefficients between the waypoint and all cells.
+
+        :param waypoint_id: Waypoint ID of the exit sign.
+        :type waypoint_id: int
+        :param time: Timestep to evaluate.
+        :type time: float
+        :return: Array of mean extinction coefficients.
+        :rtype: np.ndarray
+        """
         waypoint = self._get_waypoint_parameters(waypoint_id)
         x = waypoint[0]
         y = waypoint[1]
@@ -82,10 +148,14 @@ class VisMap:
         return mean_extco_array
 
     def _get_dist_array(self, waypoint_id):
-        '''
-        :param ref_point: point of interest
-        :return: array containing distances to ref_point
-        '''
+        """
+        Get the array containing distances between the waypoint and all cells.
+
+        :param waypoint_id: Waypoint ID.
+        :type waypoint_id: int
+        :return: Array of distances.
+        :rtype: np.ndarray
+        """
         waypoint = self._get_waypoint_parameters(waypoint_id)
         x = waypoint[0]
         y = waypoint[1]
@@ -95,6 +165,14 @@ class VisMap:
         return distance_array
 
     def _get_view_array(self, waypoint_id):
+        """
+        Get the view array considering view angles.
+
+        :param waypoint_id: Waypoint ID.
+        :type waypoint_id: int
+        :return: View array.
+        :rtype: np.ndarray
+        """
         distance_array = self._get_dist_array(waypoint_id)
         waypoint = self._get_waypoint_parameters(waypoint_id)
         x = waypoint[0]
@@ -124,7 +202,17 @@ class VisMap:
         self.view_array_list.append(view_array)
         return view_array
 
-    def _get_col_array(self, waypoint_id, z):
+    def _get_collision_array(self, waypoint_id):
+        """
+        Calculate the collision array indicating which cells obstruct visibility to a waypoint.
+
+        :param waypoint_id: ID of the waypoint.
+        :type waypoint_id: int
+        :param z: Height where collision between waypoint and all cells is evaluated.
+        :type z: float
+        :return: Boolean array describing if the waypoint is visible from a certain cell.
+        :rtype: np.ndarray
+        """
         waypoint = self._get_waypoint_parameters(waypoint_id)
         x_start = waypoint[0]
         y_start = waypoint[1]
@@ -162,6 +250,16 @@ class VisMap:
         return final.T
 
     def _get_vismap(self, waypoint_id, timestep):
+        """
+        Get the visibility map for a specific waypoint.
+
+        :param waypoint_id: Waypoint ID.
+        :type waypoint_id: int
+        :param timestep: Timestep to evaluate.
+        :type timestep: float
+        :return: Visibility map.
+        :rtype: np.ndarray
+        """
         waypoint = self._get_waypoint_parameters(waypoint_id)
         mean_extco_array = self._get_mean_extco_array(waypoint_id, timestep)
         c = waypoint[2]
@@ -169,7 +267,23 @@ class VisMap:
         vismap = np.where(vis_array > self.max_vis, self.max_vis, vis_array).astype(float)
         return vismap
 
-    def get_bool_vismap(self, waypoint_id, timestep, extinction=True, viewangle=True, colission=True, z=2):#TODO: make z value changable
+    def get_bool_vismap(self, waypoint_id, timestep, extinction=True, viewangle=True, colission=True):#TODO: make z value changable
+        """
+        Generate a boolean visibility map for a specific waypoint.
+
+        :param waypoint_id: ID of the waypoint.
+        :type waypoint_id: int
+        :param timestep: Timestep for which to calculate the visibility map.
+        :type timestep: float
+        :param extinction: Flag indicating whether to consider extinction coefficients. Default is True.
+        :type extinction: bool, optional
+        :param viewangle: Flag indicating whether to consider view angles. Default is True.
+        :type viewangle: bool, optional
+        :param colission: Flag indicating whether to consider obstructions. Default is True.
+        :type colission: bool, optional
+        :return: Boolean visibility map for the given waypoint.
+        :rtype: np.ndarray
+        """
         if viewangle == True:
             view_array = self._get_view_array(waypoint_id)
         else:
@@ -189,6 +303,18 @@ class VisMap:
         return delta_map
 
     def get_abs_bool_vismap(self, timestep, extinction=True, viewangle=True):
+        """
+        Generate an absolute boolean visibility map for all waypoints.
+
+        :param timestep: Timestep for which to calculate the visibility map.
+        :type timestep: float
+        :param extinction: Flag indicating whether to consider extinction coefficients. Default is True.
+        :type extinction: bool, optional
+        :param viewangle: Flag indicating whether to consider view angles. Default is True.
+        :type viewangle: bool, optional
+        :return: Absolute boolean visibility map.
+        :rtype: np.ndarray
+        """
         boolean_vismap_list = []
         for waypoint_id, waypoint in enumerate(self.way_points_list):
             boolean_vismap = self.get_bool_vismap(waypoint_id, timestep, extinction=extinction, viewangle=viewangle)
@@ -198,10 +324,20 @@ class VisMap:
         return absolute_boolean_vismap
 
     def get_time_aggl_abs_bool_vismap(self):
+        """
+        Calculate the time-agglomerated absolute boolean visibility map.
+
+        :return: Time-agglomerated absolute boolean visibility map.
+        :rtype: np.ndarray
+        """
         self.time_agglomerated_absolute_boolean_vismap = np.logical_and.reduce(list(self.absolute_boolean_vismap_dict.values()))
         return self.time_agglomerated_absolute_boolean_vismap
 
     def plot_abs_bool_vismap(self): # Todo: is duplicate of plot_time_agglomerated_absolute_boolean_vismap
+        """
+        Plot the absolute boolean visibility map.
+        """
+
         # if self.time_agglomerated_absolute_boolean_vismap == None:
         #     self.get_time_agglomerated_absolute_boolean_vismap()
         extent = (self.all_x_coords[0], self.all_x_coords[-1], self.all_y_coords[-1], self.all_y_coords[0])
@@ -217,9 +353,19 @@ class VisMap:
         plt.ylabel("Y / m")
 
     def add_background_image(self, file):
+        """
+        Add a background image to the plot.
+
+        :param file: Path to the background image file.
+        :type file: str
+        """
         self.background_image = plt.imread(file)
 
     def plot_time_aggl_abs_bool_vismap(self):
+        """
+        Plot the time-agglomerated absolute boolean visibility map.
+        """
+
         # if self.time_agglomerated_absolute_boolean_vismap == None:
         #     self.get_time_agglomerated_absolute_boolean_vismap()
         extent = (self.all_x_coords[0], self.all_x_coords[-1], self.all_y_coords[-1], self.all_y_coords[0])
