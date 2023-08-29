@@ -18,7 +18,7 @@ class VisMap:
     :ivar start_point: The starting point for the path. Initialized as None.
     :vartype start_point: tuple
     :ivar way_points_list: List of waypoints for the path. Initialized as an empty list.
-    :vartype way_points_list: list
+    :vartype way_points_list: list[Waypoint]
     :ivar mean_extco_array_list: List of mean extinction coefficient arrays. Initialized as an empty list.
     :vartype mean_extco_array_list: list
     :ivar view_array_list: List of view arrays. Initialized as an empty list.
@@ -49,10 +49,11 @@ class VisMap:
         self.view_array_list = []
         self.distance_array_list = []
         self.vismap_list = []
-        self.colission_array_list = []
+        self.non_concealed_cells_array_list = []
         self.delta_array_list = []
         self.min_vis = min_vis # minimum visibility to be required #Todo: set individual for each waypoint
         self.max_vis = max_vis # maximum visibility to be considered #Todo: set individual for each waypoint
+        self.eval_height = eval_height # height z where the FDS slice is evaluated and collision is checked
         self.background_image = None
         self.view_angle = True
         self.absolute_boolean_vismap_dict = {}
@@ -165,7 +166,7 @@ class VisMap:
         """
         wp = self._get_waypoint(waypoint_id)
         self.xv, self.yv = np.meshgrid(self.all_x_coords, self.all_y_coords)
-        distance_array = np.sqrt((self.xv - x)**2 + (self.yv - y)**2)
+        distance_array = np.linalg.norm(np.array([self.xv - wp.x, self.yv - wp.y]), axis=0)
         self.distance_array_list.append(distance_array)
         return distance_array
 
@@ -204,50 +205,69 @@ class VisMap:
         self.view_array_list.append(view_array)
         return view_array
 
-    def _get_collision_array(self, waypoint_id):
+    def _get_non_concealed_cells_array(self, waypoint_id, evaluation_height):
         """
-        Calculate the collision array indicating which cells obstruct visibility to a waypoint.
+        Compute the visibility matrix indicating obstructed cells when observing a given waypoint.
 
-        :param waypoint_id: ID of the waypoint.
+        :param waypoint_id: The ID of the waypoint under observation.
         :type waypoint_id: int
-        :param z: Height where collision between waypoint and all cells is evaluated.
-        :type z: float
-        :return: Boolean array describing if the waypoint is visible from a certain cell.
+        :param evaluation_height: The height at which to evaluate obstructions.
+        :type evaluation_height: float
+        :return: A 2D boolean array; True indicates obstructed visibility from the cell to the waypoint.
         :rtype: np.ndarray
         """
+        # Retrieve the coordinates for the target waypoint
         wp = self._get_waypoint(waypoint_id)
-        i_ref = find_closest_point(self.all_x_coords, wp.x)
-        j_ref = find_closest_point(self.all_y_coords, wp.y)
-        extco_array = self._get_extco_array(0)
-        obst_array = np.zeros_like(extco_array)
-        for obst in self.obstructions:
-            for sub_obst in obst:
-                _, x_extend, y_extend, z_extend = sub_obst.extent
-                if z_extend[0] <= z <= z_extend[1]:
-                    x_i_min = (np.abs(self.all_x_coords - x_extend[0])).argmin()
-                    x_i_max = (np.abs(self.all_x_coords - x_extend[1])).argmin()
-                    y_i_min = (np.abs(self.all_y_coords - y_extend[0])).argmin()
-                    y_i_max = (np.abs(self.all_y_coords - y_extend[1])).argmin()
-                    obst_array[x_i_min:x_i_max, y_i_min:y_i_max] = True
-        obst_array = np.flip(obst_array, axis=1)
-        final = np.zeros_like(obst_array)
-        b = final.copy()
-        edges = np.ones_like(obst_array)
-        edges[1:-1, 1:-1] = False
-        edge_x, edge_y = np.where(edges == True)
-        for i, j in zip(edge_x, edge_y):
-            b_x, b_y = line(i_ref, j_ref, i, j)
-            b[b_x, b_y] = True
-            cuts = np.where((obst_array == True) & (b == True))
-            if cuts[0].size != 0:
-                x_cut_coord = np.in1d(b_x, cuts[0])
-                x_cut_index = np.where(x_cut_coord == True)[0][0]
-                final[b_x[:x_cut_index], b_y[:x_cut_index]] = True
+
+        # Find the closest grid coordinates to the target waypoint
+        closest_x_idx = find_closest_point(self.all_x_coords, wp.x)
+        closest_y_idx = find_closest_point(self.all_y_coords, wp.y)
+
+        # Initialize arrays for external collisions and cell obstructions
+        meshgrid = self._get_extco_array(0)
+        obstruction_array = np.zeros_like(meshgrid)
+
+        # Update the obstruction_matrix based on defined obstructions and their height ranges
+        for obstruction in self.obstructions:
+            for sub_obstruction in obstruction:
+                _, x_range, y_range, z_range = sub_obstruction.extent
+                if z_range[0] <= evaluation_height <= z_range[1]:
+                    x_min_idx = (np.abs(self.all_x_coords - x_range[0])).argmin()
+                    x_max_idx = (np.abs(self.all_x_coords - x_range[1])).argmin()
+                    y_min_idx = (np.abs(self.all_y_coords - y_range[0])).argmin()
+                    y_max_idx = (np.abs(self.all_y_coords - y_range[1])).argmin()
+                    obstruction_array[x_min_idx:x_max_idx, y_min_idx:y_max_idx] = True
+
+        # Mirror the obstruction_matrix horizontally
+        obstruction_array = np.flip(obstruction_array, axis=1)
+
+        # Initialize arrays for the final visibility matrix, buffer matrix, and edge cell identification
+        non_concealed_cells_array = np.zeros_like(obstruction_array)
+        buffer_array = non_concealed_cells_array.copy()
+        edge_cells = np.ones_like(obstruction_array)
+        edge_cells[1:-1, 1:-1] = False
+        edge_x_idx, edge_y_idx = np.where(edge_cells == True)
+
+        # Iterate through edge cells to update visibility based on obstructions
+        for i, j in zip(edge_x_idx, edge_y_idx):
+            line_x_idx, line_y_idx = line(closest_x_idx, closest_y_idx, i, j)
+            buffer_array[line_x_idx, line_y_idx] = True
+            obstructed_cells = np.where((obstruction_array == True) & (buffer_array == True))
+
+            # If line intersects obstructions, mark only the segment before the first obstruction as visible
+            if obstructed_cells[0].size != 0:
+                cut_idx = np.where(np.in1d(line_x_idx, obstructed_cells[0]) == True)[0][0]
+                non_concealed_cells_array[line_x_idx[:cut_idx], line_y_idx[:cut_idx]] = True
+            # If the line doesn't intersect any obstructions, mark the entire line as visible
             else:
-                final[b_x, b_y] = True
-            b = final.copy()
-        self.colission_array_list.append(final.T)
-        return final.T
+                non_concealed_cells_array[line_x_idx, line_y_idx] = True
+
+            # Reset the buffer matrix for the next iteration
+            buffer_array.fill(0)
+
+        # Add the finalized visibility matrix to the list and return its transpose
+        self.non_concealed_cells_array_list.append(non_concealed_cells_array.T)
+        return non_concealed_cells_array.T
 
     def _get_vismap(self, waypoint_id, timestep):
         """
@@ -293,7 +313,8 @@ class VisMap:
             vismap = self.max_vis
         distance_array = self._get_dist_array(waypoint_id)
         if colission == True:
-            colission_array = self._get_col_array(waypoint_id, z)
+            z = self.eval_height
+            colission_array = self._get_non_concealed_cells_array(waypoint_id, z)
         else:
             colission_array = 1
         vismap_total = view_array * vismap * colission_array
