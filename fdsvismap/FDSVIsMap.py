@@ -70,6 +70,14 @@ class VisMap:
         return self.way_points_list[waypoint_id]
 
     def set_start_point(self, x, y):
+        """
+        Set the starting point for the path.
+
+        :param x: X coordinate of the starting point.
+        :type x: float
+        :param y: Y coordinate of the starting point.
+        :type y: float
+        """
         self.start_point = (x, y)
 
     def set_waypoint(self, x, y, c=3, ior=None):
