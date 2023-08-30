@@ -1,5 +1,5 @@
 import numpy as np
-from skimage.draw import line
+from skimage.draw import line, line_aa
 import matplotlib.pyplot as plt
 import matplotlib.colors
 
@@ -248,9 +248,13 @@ class VisMap:
         edge_cells[1:-1, 1:-1] = False
         edge_x_idx, edge_y_idx = np.where(edge_cells == True)
 
+        # Choose the appropriate line function based on the aa flag
+        line_func = line_aa if aa else line
+
         # Iterate through edge cells to update visibility based on obstructions
-        for i, j in zip(edge_x_idx, edge_y_idx):
-            line_x_idx, line_y_idx = line(closest_x_idx, closest_y_idx, i, j)
+        for x_id, y_id in zip(edge_x_idx, edge_y_idx):
+            line_x_idx, line_y_idx = line_func(closest_x_id, closest_y_id, x_id, y_id)[:2]
+
             buffer_array[line_x_idx, line_y_idx] = True
             obstructed_cells = np.where((obstruction_array == True) & (buffer_array == True))
 
