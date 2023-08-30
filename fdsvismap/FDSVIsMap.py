@@ -7,6 +7,7 @@ import fdsreader as fds
 from .helper_functions import find_closest_point
 from .Waypoint import Waypoint
 
+
 class VisMap:
     """
     A class to represent a Visibility Map (VisMap) based on Fire Dynamics Simulator (FDS) data.
@@ -27,7 +28,10 @@ class VisMap:
     :vartype distance_array_list: list
     :ivar vis_map_array: The array representing the visibility map. Initialized as None.
     :vartype vis_map_array: np.ndarray
+    :param ivar: Quantity of FDS slice file to be evaluated.
+    :type vartype: str
     """
+
     def __init__(self, sim_dir, min_vis=0, max_vis=30, eval_height=2):
         """
         Initialize the VisMap object.
@@ -41,6 +45,8 @@ class VisMap:
         :param eval_height: The height at which to evaluate visibility. Default is 2.
         :type eval_height: float, optional
         """
+        self.times = None
+        self.quantity = 'ext_coef_C0.9H0.1'
         self.sim_dir = sim_dir
         self.slc = None
         self.start_point = None
@@ -50,10 +56,11 @@ class VisMap:
         self.distance_array_list = []
         self.vismap_list = []
         self.non_concealed_cells_array_list = []
+        self.non_concealed_cells_xy_idx_dict = {}
         self.delta_array_list = []
-        self.min_vis = min_vis # minimum visibility to be required #Todo: set individual for each waypoint
-        self.max_vis = max_vis # maximum visibility to be considered #Todo: set individual for each waypoint
-        self.eval_height = eval_height # height z where the FDS slice is evaluated and collision is checked
+        self.min_vis = min_vis  # minimum visibility to be required #Todo: set individual for each waypoint
+        self.max_vis = max_vis  # maximum visibility to be considered #Todo: set individual for each waypoint
+        self.eval_height = eval_height  # height z where the FDS slice is evaluated and collision is checked
         self.background_image = None
         self.view_angle = True
         self.absolute_boolean_vismap_dict = {}

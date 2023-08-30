@@ -1,5 +1,6 @@
 import numpy as np
 
+
 def find_closest_point(coord_array, value):
     """
     Find the closest point in a given coordinate array to a given value.
