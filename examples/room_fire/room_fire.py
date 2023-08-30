@@ -18,10 +18,9 @@ vis.set_waypoint(17, 0, 5, 2)
 
 # Set times when the simulation should be evaluated
 vis.set_times([0, 60, 120])
-vis.compute_all()
 
-# Compute time agglomerated absolute boolean vismap
-vis.get_time_aggl_abs_bool_vismap()
+# Do the required calculations to create the Vismap
+vis.compute_all()
 
 # Plot time agglomerated absolute boolean vismap
 vis.plot_time_aggl_abs_bool_vismap()
