@@ -65,7 +65,15 @@ class VisMap:
         self.view_angle = True
         self.absolute_boolean_vismap_dict = {}
         self.time_agglomerated_absolute_boolean_vismap = None
-        self._read_fds_data()
+
+    def set_times(self, times):
+        """
+        Set the times on which the simulation should be evaluated
+
+        :param times: List of times in the Simulation.
+        :type times: list
+        """
+        self.times = times
 
     def _get_waypoint(self, waypoint_id):
         """
@@ -104,29 +112,25 @@ class VisMap:
         """
         self.way_points_list.append(Waypoint(x, y, c, ior))
 
-    def _read_fds_data(self, quantity='OD_C0.9H0.1', slice=None): #: Todo: specify slice closest to given height
+    def _read_fds_data(self, slice_id=0):  #: Todo: specify slice closest to given height
         """
         Read FDS data and store relevant slices and obstructions.
 
-        :param quantity: Quantity of FDS slice file to be evaluated.
-        :type quantity: str
-        :param slice: Index of FDS slice file to be evaluated.
-        :type slice: int
+        :param slice_id: Index of FDS slice file to be evaluated.
+        :type slice_id: int
         """
-        quantity = 'ext_coef_C0.9H0.1'
-        # quantity = 'VIS_C0.9H0.1'
         sim = fds.Simulation(self.sim_dir)
-        print(sim.slices)
-        self.slc = sim.slices.filter_by_quantity(quantity)[0]
+        self.slc = sim.slices.filter_by_quantity(self.quantity)[slice_id]
         self.obstructions = sim.obstructions
         self.all_x_coords = self.slc.coordinates["x"]
         self.all_y_coords = self.slc.coordinates["y"]
+        self.grid_shape = (len(self.all_x_coords), (len(self.all_y_coords)))
 
     def _get_extco_array(self, time):
         """
-        Get the array of extinction coefficients at a given time.
+        Get the array of extinction coefficients from the relevant slice file at a given time.
 
-        :param time: Timestep to evaluate.
+        :param time: Timestep to evaluate in seconds.
         :type time: float
         :return: Array of extinction coefficients at the specified time.
         :rtype: np.ndarray
@@ -136,9 +140,26 @@ class VisMap:
         extco_array = data
         return extco_array
 
-    def _get_mean_extco_array(self, waypoint_id, time):
+    def _get_non_concealed_cells_idx(self, waypoint_id):
         """
         Get the array of mean extinction coefficients between the waypoint and all cells.
+
+        :param waypoint_id: Waypoint ID of the exit sign.
+        :type waypoint_id: int
+        """
+
+        try:
+            x_idx = self.non_concealed_cells_xy_idx_dict[waypoint_id][1]
+            y_idx = self.non_concealed_cells_xy_idx_dict[waypoint_id][0]
+        except:
+            x, y = np.meshgrid(range(self.grid_shape[1]), range(self.grid_shape[0]), indexing='ij')
+            x_idx = x.flatten().tolist()
+            y_idx = y.flatten().tolist()
+        return x_idx, y_idx
+
+    def _get_mean_extco_array(self, waypoint_id, time):
+        """
+        Get the array of mean extinction coefficients between the waypoint and all non concealed cells.
 
         :param waypoint_id: Waypoint ID of the exit sign.
         :type waypoint_id: int
@@ -149,17 +170,19 @@ class VisMap:
         """
         wp = self._get_waypoint(waypoint_id)
         extco_array = self._get_extco_array(time)
-        i_ref = find_closest_point(self.all_x_coords, wp.x)
-        j_ref = find_closest_point(self.all_y_coords, wp.y)
+        ref_x_id = find_closest_point(self.all_x_coords, wp.x)
+        ref_y_id = find_closest_point(self.all_y_coords, wp.y)
         mean_extco_array = np.zeros_like(extco_array)
-        for i, x in enumerate(self.all_x_coords):
-            for j, y in enumerate(self.all_y_coords):
-                img = np.zeros_like(extco_array)
-                rr, cc = line(i_ref, j_ref, i, j)
-                img[rr, cc] = 1
-                n_cells = np.count_nonzero(img)
-                mean_extco = np.sum(extco_array * img) / n_cells
-                mean_extco_array[i, j] = mean_extco
+
+        non_concealed_x_idx, non_concealed_y_idx = self._get_non_concealed_cells_idx(waypoint_id)
+
+        for x_id, y_id in zip(non_concealed_x_idx, non_concealed_y_idx):
+            img = np.zeros_like(extco_array)
+            x_lp_idx, y_lp_idx = line(ref_x_id, ref_y_id, x_id, y_id)
+            img[x_lp_idx, y_lp_idx] = 1
+            n_cells = len(x_lp_idx)
+            mean_extco = np.sum(extco_array * img) / n_cells
+            mean_extco_array[x_id, y_id] = mean_extco
         return mean_extco_array
 
     def _get_dist_array(self, waypoint_id):
@@ -174,10 +197,11 @@ class VisMap:
         wp = self._get_waypoint(waypoint_id)
         self.xv, self.yv = np.meshgrid(self.all_x_coords, self.all_y_coords)
         distance_array = np.linalg.norm(np.array([self.xv - wp.x, self.yv - wp.y]), axis=0)
+
         self.distance_array_list.append(distance_array)
         return distance_array
 
-    def _get_view_array(self, waypoint_id):
+    def _get_view_angle_array(self, waypoint_id):
         """
         Get the view array considering view angles.
 
@@ -211,8 +235,27 @@ class VisMap:
             view_array = view_angle_array
         self.view_array_list.append(view_array)
         return view_array
+    
+    def build_obstructions_array(self):
+        # Initialize arrays for external collisions and cell obstructions
+        meshgrid = self._get_extco_array(0)
+        self.obstruction_array = np.zeros_like(meshgrid)
 
-    def _get_non_concealed_cells_array(self, waypoint_id, evaluation_height):
+        # Update the obstruction_matrix based on defined obstructions and their height ranges
+        for obstruction in self.obstructions:
+            for sub_obstruction in obstruction:
+                _, x_range, y_range, z_range = sub_obstruction.extent
+                if z_range[0] <= self.eval_height <= z_range[1]:
+                    x_min_id = (np.abs(self.all_x_coords - x_range[0])).argmin()
+                    x_max_id = (np.abs(self.all_x_coords - x_range[1])).argmin()
+                    y_min_id = (np.abs(self.all_y_coords - y_range[0])).argmin()
+                    y_max_id = (np.abs(self.all_y_coords - y_range[1])).argmin()
+                    self.obstruction_array[x_min_id:x_max_id, y_min_id:y_max_id] = True
+
+        # Mirror the obstruction_matrix horizontally
+        self.obstruction_array = np.flip(self.obstruction_array, axis=1)
+
+    def _get_non_concealed_cells_array(self, waypoint_id, aa=True):
         """
         Compute the visibility matrix indicating obstructed cells when observing a given waypoint.
 
@@ -220,6 +263,8 @@ class VisMap:
         :type waypoint_id: int
         :param evaluation_height: The height at which to evaluate obstructions.
         :type evaluation_height: float
+        :param aa: Flag indicating whether to anti-aliasing should be used. Default is True.
+        :type aa: bool, optional
         :return: A 2D boolean array; True indicates obstructed visibility from the cell to the waypoint.
         :rtype: np.ndarray
         """
@@ -227,32 +272,16 @@ class VisMap:
         wp = self._get_waypoint(waypoint_id)
 
         # Find the closest grid coordinates to the target waypoint
-        closest_x_idx = find_closest_point(self.all_x_coords, wp.x)
-        closest_y_idx = find_closest_point(self.all_y_coords, wp.y)
+        closest_x_id = find_closest_point(self.all_x_coords, wp.x)
+        closest_y_id = find_closest_point(self.all_y_coords, wp.y)
 
-        # Initialize arrays for external collisions and cell obstructions
-        meshgrid = self._get_extco_array(0)
-        obstruction_array = np.zeros_like(meshgrid)
-
-        # Update the obstruction_matrix based on defined obstructions and their height ranges
-        for obstruction in self.obstructions:
-            for sub_obstruction in obstruction:
-                _, x_range, y_range, z_range = sub_obstruction.extent
-                if z_range[0] <= evaluation_height <= z_range[1]:
-                    x_min_idx = (np.abs(self.all_x_coords - x_range[0])).argmin()
-                    x_max_idx = (np.abs(self.all_x_coords - x_range[1])).argmin()
-                    y_min_idx = (np.abs(self.all_y_coords - y_range[0])).argmin()
-                    y_max_idx = (np.abs(self.all_y_coords - y_range[1])).argmin()
-                    obstruction_array[x_min_idx:x_max_idx, y_min_idx:y_max_idx] = True
-
-        # Mirror the obstruction_matrix horizontally
-        obstruction_array = np.flip(obstruction_array, axis=1)
 
         # Initialize arrays for the final visibility matrix, buffer matrix, and edge cell identification
-        non_concealed_cells_array = np.zeros_like(obstruction_array)
+        non_concealed_cells_array = np.zeros_like(self.obstruction_array)
         buffer_array = non_concealed_cells_array.copy()
-        edge_cells = np.ones_like(obstruction_array)
-        edge_cells[1:-1, 1:-1] = False
+        edge_cells = np.ones_like(self.obstruction_array)
+        # edge_cells[1:-1, 1:-1] = False
+        # edge_cells[30:-30, 30:-30] = False
         edge_x_idx, edge_y_idx = np.where(edge_cells == True)
 
         # Choose the appropriate line function based on the aa flag
@@ -263,12 +292,12 @@ class VisMap:
             line_x_idx, line_y_idx = line_func(closest_x_id, closest_y_id, x_id, y_id)[:2]
 
             buffer_array[line_x_idx, line_y_idx] = True
-            obstructed_cells = np.where((obstruction_array == True) & (buffer_array == True))
+            obstructed_cells = np.where((self.obstruction_array == True) & (buffer_array == True))
 
             # If line intersects obstructions, mark only the segment before the first obstruction as visible
             if obstructed_cells[0].size != 0:
-                cut_idx = np.where(np.in1d(line_x_idx, obstructed_cells[0]) == True)[0][0]
-                non_concealed_cells_array[line_x_idx[:cut_idx], line_y_idx[:cut_idx]] = True
+                num_vis_cells = np.where(np.in1d(line_x_idx, obstructed_cells[0]) == True)[0][0]
+                non_concealed_cells_array[line_x_idx[:num_vis_cells], line_y_idx[:num_vis_cells]] = True
             # If the line doesn't intersect any obstructions, mark the entire line as visible
             else:
                 non_concealed_cells_array[line_x_idx, line_y_idx] = True
@@ -277,8 +306,10 @@ class VisMap:
             buffer_array.fill(0)
 
         # Add the finalized visibility matrix to the list and return its transpose
-        self.non_concealed_cells_array_list.append(non_concealed_cells_array.T)
-        return non_concealed_cells_array.T
+        non_concealed_cells_array = non_concealed_cells_array.T
+        self.non_concealed_cells_array_list.append(non_concealed_cells_array)
+        self.non_concealed_cells_xy_idx_dict[waypoint_id] = np.where(non_concealed_cells_array == True)
+        return non_concealed_cells_array
 
     def _get_vismap(self, waypoint_id, timestep):
         """
@@ -297,7 +328,7 @@ class VisMap:
         vismap = np.where(vis_array > self.max_vis, self.max_vis, vis_array).astype(float)
         return vismap
 
-    def get_bool_vismap(self, waypoint_id, timestep, extinction=True, viewangle=True, colission=True):#TODO: make z value changable
+    def get_bool_vismap(self, waypoint_id, timestep, extinction, view_angle, collision, aa):
         """
         Generate a boolean visibility map for a specific waypoint.
 
@@ -307,51 +338,58 @@ class VisMap:
         :type timestep: float
         :param extinction: Flag indicating whether to consider extinction coefficients. Default is True.
         :type extinction: bool, optional
-        :param viewangle: Flag indicating whether to consider view angles. Default is True.
-        :type viewangle: bool, optional
-        :param colission: Flag indicating whether to consider obstructions. Default is True.
-        :type colission: bool, optional
+        :param view_angle: Flag indicating whether to consider view angles. Default is True.
+        :type view_angle: bool, optional
+        :param collision: Flag indicating whether to consider obstructions. Default is True.
+        :type collision: bool, optional
+        :param aa: Flag indicating whether to anti-aliasing should be used. Default is True.
+        :type aa: bool, optional
         :return: Boolean visibility map for the given waypoint.
         :rtype: np.ndarray
+
         """
-        if viewangle == True:
-            view_array = self._get_view_array(waypoint_id)
+        if collision:
+            non_concealed_cells_array = self._get_non_concealed_cells_array(waypoint_id, aa)
+        else:
+            non_concealed_cells_array = 1
+        if view_angle:
+            view_array = self._get_view_angle_array(waypoint_id)
         else:
             view_array = 1
-        if extinction == True:
+        if extinction:
             vismap = self._get_vismap(waypoint_id, timestep)
         else:
             vismap = self.max_vis
         distance_array = self._get_dist_array(waypoint_id)
-        if colission == True:
-            z = self.eval_height
-            colission_array = self._get_non_concealed_cells_array(waypoint_id, z)
-        else:
-            colission_array = 1
-        vismap_total = view_array * vismap * colission_array
-        delta_map = np.where(vismap_total >= distance_array, True, False)
-        delta_map = np.where(vismap_total < self.min_vis, False, delta_map)
-        return delta_map
 
-    def get_abs_bool_vismap(self, timestep, extinction=True, viewangle=True):
+        vismap_total = view_array * vismap * non_concealed_cells_array
+        bool_vismap = np.where(vismap_total >= distance_array, True, False)
+        bool_vismap = np.where(vismap_total < self.min_vis, False, bool_vismap)
+        return bool_vismap
+
+    def get_abs_bool_vismap(self, time, extinction, view_angle, collision, aa):
         """
         Generate an absolute boolean visibility map for all waypoints.
 
-        :param timestep: Timestep for which to calculate the visibility map.
-        :type timestep: float
-        :param extinction: Flag indicating whether to consider extinction coefficients. Default is True.
+
+        :param time: Timestep for which to calculate the visibility map.
+        :type time: float
+        :param extinction: Flag indicating whether to consider extinction coefficients
         :type extinction: bool, optional
-        :param viewangle: Flag indicating whether to consider view angles. Default is True.
-        :type viewangle: bool, optional
+        :param view_angle: Flag indicating whether to consider view angles.
+        :type view_angle: bool, optional
+        :param collision: Flag indicating whether to consider collision.
+        :type collision: bool, optional
+        :param aa: Flag indicating whether to anti-aliasing should be used. Default is True.
+        :type aa: bool, optional
         :return: Absolute boolean visibility map.
         :rtype: np.ndarray
         """
         boolean_vismap_list = []
         for waypoint_id, waypoint in enumerate(self.way_points_list):
-            boolean_vismap = self.get_bool_vismap(waypoint_id, timestep, extinction=extinction, viewangle=viewangle)
+            boolean_vismap = self.get_bool_vismap(waypoint_id, time, extinction, view_angle, collision, aa)
             boolean_vismap_list.append(boolean_vismap)
             absolute_boolean_vismap = np.logical_or.reduce(boolean_vismap_list)
-            self.absolute_boolean_vismap_dict[timestep] = absolute_boolean_vismap
         return absolute_boolean_vismap
 
     def get_time_aggl_abs_bool_vismap(self):
@@ -361,10 +399,9 @@ class VisMap:
         :return: Time-agglomerated absolute boolean visibility map.
         :rtype: np.ndarray
         """
-        self.time_agglomerated_absolute_boolean_vismap = np.logical_and.reduce(list(self.absolute_boolean_vismap_dict.values()))
         return self.time_agglomerated_absolute_boolean_vismap
 
-    def plot_abs_bool_vismap(self): # Todo: is duplicate of plot_time_agglomerated_absolute_boolean_vismap
+    def plot_abs_bool_vismap(self):  # Todo: is duplicate of plot_time_agglomerated_absolute_boolean_vismap
         """
         Plot the absolute boolean visibility map.
         """
@@ -392,6 +429,17 @@ class VisMap:
         """
         self.background_image = plt.imread(file)
 
+    def compute_all(self, extinction=True, view_angle=True, collision=True, aa=True):
+        self._read_fds_data()
+        self.build_obstructions_array()
+        for time in self.times:
+            absolute_boolean_vismap = self.get_abs_bool_vismap(time, extinction, view_angle, collision, aa)
+            self.absolute_boolean_vismap_dict[time] = absolute_boolean_vismap
+        self.time_agglomerated_absolute_boolean_vismap = np.logical_and.reduce(
+            list(self.absolute_boolean_vismap_dict.values()))
+
+
+
     def plot_time_aggl_abs_bool_vismap(self):
         """
         Plot the time-agglomerated absolute boolean visibility map.
@@ -408,10 +456,11 @@ class VisMap:
         x_values = [wp.x for wp in self.way_points_list]
         y_values = [wp.y for wp in self.way_points_list]
 
-        plt.plot((self.start_point[0], *x_values),(self.start_point[1], *y_values), color='darkgreen', linestyle='--')
-        plt.scatter((self.start_point[0], *x_values),(self.start_point[1], *y_values), color='darkgreen')
+        plt.plot((self.start_point[0], *x_values), (self.start_point[1], *y_values), color='darkgreen', linestyle='--')
+        plt.scatter((self.start_point[0], *x_values), (self.start_point[1], *y_values), color='darkgreen')
         for wp_id, wp in enumerate(self.way_points_list):
-            plt.annotate(f"WP : {wp_id:>}\nC : {wp.c:>}\nIOR : {wp.ior}", xy=(wp.x+0.3, wp.y+1.5),  bbox=dict(boxstyle="round", fc="w"), fontsize=6)
+            plt.annotate(f"WP : {wp_id:>}\nC : {wp.c:>}\nIOR : {wp.ior}", xy=(wp.x + 0.3, wp.y + 1.5),
+                         bbox=dict(boxstyle="round", fc="w"), fontsize=6)
         plt.xlabel("X / m")
         plt.ylabel("Y / m")
         plt.show()
