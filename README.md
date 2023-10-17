@@ -42,4 +42,4 @@ vis.compute_all()
 vis.plot_time_aggl_abs_bool_vismap(size=[15,10],bbox_pad=1,fontsize=10,display_colorbar=True)
 ```
 # Preview Notebook
-[View the rendered example notebook](https://nbviewer.jupyter.org/github/Haukiy/fdsvismap/blob/main/demo_fds_vismap_nb.ipynb)
+[View the example notebook](https://github.com/Haukiy/fdsvismap/blob/main/demo_fds_vismap_nb.ipynb)
