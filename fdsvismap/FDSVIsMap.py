@@ -32,7 +32,7 @@ class VisMap:
     :type vartype: str
     """
 
-    def __init__(self, sim_dir, min_vis=0, max_vis=30, eval_height=2):
+    def __init__(self, sim_dir, min_vis=0, max_vis=30, eval_height=2, debug=False):
         """
         Initialize the VisMap object.
 
@@ -44,6 +44,8 @@ class VisMap:
         :type max_vis: float, optional
         :param eval_height: The height at which to evaluate visibility. Default is 2.
         :type eval_height: float, optional
+        :debug: bool, optional. A flag that enables or disables debugging messages.
+                        Default is False (debugging messages disabled).
         """
         self.times = None
         self.quantity = 'ext_coef_C0.9H0.1'
@@ -65,6 +67,37 @@ class VisMap:
         self.view_angle = True
         self.absolute_boolean_vismap_dict = {}
         self.time_agglomerated_absolute_boolean_vismap = None
+        self.debug = debug
+
+    def debug_message(self, message, output=None):
+        """
+        Prints debugging information. Useful for identifying issues related to the fdsReader version change.
+
+        Parameters:
+        - message (str): A message to be printed, typically naming the output being debugged.
+        - output (optional): The variable or object to be examined. It could be of any type, but special
+                             information is printed for lists, tuples, and objects with a 'shape' attribute.
+
+        If debugging is enabled, this function will:
+        - Always print the message.
+        - Print additional information about the 'output' parameter, if provided. The additional information
+          varies depending on the type of 'output':
+          - If 'output' has a 'shape' attribute, its shape is printed.
+          - If 'output' is a list or tuple, its length is printed.
+          - Otherwise, 'output' is printed directly.
+          (helped to find fdsreader syntax "switch")
+        """
+
+        if self.debug:  # Check if debugging is enabled
+            print(f"DEBUG - {message}")  # Always print the message
+
+            if output is not None:  # If an output is provided, print additional information
+                if hasattr(output, 'shape'):  # Check for 'shape' attribute, typically present in numpy arrays
+                    print(f"Output Shape: {output.shape}")  # Print the shape of 'output'
+                elif isinstance(output, (list, tuple)):  # Check if 'output' is a list or tuple
+                    print(f"Output Length: {len(output)}")  # Print the length of 'output'
+                else:  # For other types of 'output', print them directly
+                    print(f"Output: {output}")
 
     def set_times(self, times):
         """
@@ -73,7 +106,10 @@ class VisMap:
         :param times: List of times in the Simulation.
         :type times: list
         """
+
         self.times = times
+        self.debug_message("set_times:", self.times)
+
 
     def _get_waypoint(self, waypoint_id):
         """
@@ -112,19 +148,39 @@ class VisMap:
         """
         self.way_points_list.append(Waypoint(x, y, c, ior))
 
-    def _read_fds_data(self, slice_id=0):  #: Todo: specify slice closest to given height
+    #: Todo: specify slice closest to given height, done:171023, slice_id, can be deleted?
+    def _read_fds_data(self, slice_id=0):
         """
         Read FDS data and store relevant slices and obstructions.
 
-        :param slice_id: Index of FDS slice file to be evaluated.
-        :type slice_id: int
+        Parameters:
+        - slice_id (int): Index of FDS slice file to be evaluated. Default is 0.
         """
+
+        # Load the simulation data
         sim = fds.Simulation(self.sim_dir)
-        self.slc = sim.slices.filter_by_quantity(self.quantity)[slice_id]
+
+        # Get the relevant slice and obstructions
+        self.slc = sim.slices.filter_by_quantity(self.quantity).get_nearest(z=self.eval_height)
+        self.slc_alldata, self.coordinates = self.slc.to_global(masked=False, return_coordinates=True)
         self.obstructions = sim.obstructions
-        self.all_x_coords = self.slc.coordinates["x"]
-        self.all_y_coords = self.slc.coordinates["y"]
-        self.grid_shape = (len(self.all_x_coords), (len(self.all_y_coords)))
+
+        # Store x and y coordinates
+        self.all_x_coords = self.coordinates["x"]
+        self.all_y_coords = self.coordinates["y"]
+
+        # Verify that the slice is at the expected height
+        slc_z_height = self.coordinates["z"][0]
+        threshold_z = 0.10 # the slc of the example is at 2.1
+        if not (self.eval_height - threshold_z <= slc_z_height <= self.eval_height + threshold_z):
+            print("\n!!! ATTENTION !!!")
+            print("The slice is NOT at the expected height.")
+            print(f"Expected Height: {self.eval_height} ± {threshold_z}")
+            print(f"Actual Height: {slc_z_height}")
+            print("Please adjust the slice height to match the expected height.\n")
+
+        # Store the shape of the grid
+        self.grid_shape = (len(self.all_x_coords), len(self.all_y_coords))
 
     def _get_extco_array(self, time):
         """
@@ -136,8 +192,9 @@ class VisMap:
         :rtype: np.ndarray
         """
         time_index = self.slc.get_nearest_timestep(time)
-        data = self.slc.to_global_nonuniform()[time_index]
+        data = self.slc_alldata[time_index]
         extco_array = data
+        self.debug_message("_get_extco_array:",extco_array)
         return extco_array
 
     def _get_non_concealed_cells_idx(self, waypoint_id):
@@ -155,6 +212,9 @@ class VisMap:
             x, y = np.meshgrid(range(self.grid_shape[1]), range(self.grid_shape[0]), indexing='ij')
             x_idx = x.flatten().tolist()
             y_idx = y.flatten().tolist()
+
+        self.debug_message("_get_non_concealed_cells_idx:", x_idx)
+        self.debug_message("_get_non_concealed_cells_idx:", y_idx)
         return x_idx, y_idx
 
     def _get_mean_extco_array(self, waypoint_id, time):
@@ -183,6 +243,8 @@ class VisMap:
             n_cells = len(x_lp_idx)
             mean_extco = np.sum(extco_array * img) / n_cells
             mean_extco_array[x_id, y_id] = mean_extco
+
+        self.debug_message("_get_mean_extco_array:", mean_extco_array)
         return mean_extco_array
 
     def _get_dist_array(self, waypoint_id):
@@ -199,6 +261,8 @@ class VisMap:
         distance_array = np.linalg.norm(np.array([self.xv - wp.x, self.yv - wp.y]), axis=0)
 
         self.distance_array_list.append(distance_array)
+
+        self.debug_message("_get_dist_array:", distance_array.shape)
         return distance_array
 
     def _get_view_angle_array(self, waypoint_id):
@@ -234,8 +298,10 @@ class VisMap:
         else:
             view_array = view_angle_array
         self.view_array_list.append(view_array)
+
+        self.debug_message("_get_view_angle_array:", view_array)
         return view_array
-    
+
     def build_obstructions_array(self):
         # Initialize arrays for external collisions and cell obstructions
         meshgrid = self._get_extco_array(0)
@@ -275,7 +341,6 @@ class VisMap:
         closest_x_id = find_closest_point(self.all_x_coords, wp.x)
         closest_y_id = find_closest_point(self.all_y_coords, wp.y)
 
-
         # Initialize arrays for the final visibility matrix, buffer matrix, and edge cell identification
         non_concealed_cells_array = np.zeros_like(self.obstruction_array)
         buffer_array = non_concealed_cells_array.copy()
@@ -309,6 +374,8 @@ class VisMap:
         non_concealed_cells_array = non_concealed_cells_array.T
         self.non_concealed_cells_array_list.append(non_concealed_cells_array)
         self.non_concealed_cells_xy_idx_dict[waypoint_id] = np.where(non_concealed_cells_array == True)
+
+        self.debug_message("_get_non_concealed_cells_array:", non_concealed_cells_array)
         return non_concealed_cells_array
 
     def _get_vismap(self, waypoint_id, timestep):
@@ -326,6 +393,8 @@ class VisMap:
         mean_extco_array = self._get_mean_extco_array(waypoint_id, timestep)
         vis_array = wp.c / mean_extco_array.T
         vismap = np.where(vis_array > self.max_vis, self.max_vis, vis_array).astype(float)
+
+        self.debug_message("_get_vismap:", vismap)
         return vismap
 
     def get_bool_vismap(self, waypoint_id, timestep, extinction, view_angle, collision, aa):
@@ -365,6 +434,8 @@ class VisMap:
         vismap_total = view_array * vismap * non_concealed_cells_array
         bool_vismap = np.where(vismap_total >= distance_array, True, False)
         bool_vismap = np.where(vismap_total < self.min_vis, False, bool_vismap)
+
+        self.debug_message("get_bool_vismap:", bool_vismap)
         return bool_vismap
 
     def get_abs_bool_vismap(self, time, extinction, view_angle, collision, aa):
@@ -390,6 +461,8 @@ class VisMap:
             boolean_vismap = self.get_bool_vismap(waypoint_id, time, extinction, view_angle, collision, aa)
             boolean_vismap_list.append(boolean_vismap)
             absolute_boolean_vismap = np.logical_or.reduce(boolean_vismap_list)
+
+        self.debug_message("get_abs_bool_vismap:", absolute_boolean_vismap)
         return absolute_boolean_vismap
 
     def get_time_aggl_abs_bool_vismap(self):
@@ -405,7 +478,6 @@ class VisMap:
         """
         Plot the absolute boolean visibility map.
         """
-
         # if self.time_agglomerated_absolute_boolean_vismap == None:
         #     self.get_time_agglomerated_absolute_boolean_vismap()
         extent = (self.all_x_coords[0], self.all_x_coords[-1], self.all_y_coords[-1], self.all_y_coords[0])
@@ -438,29 +510,55 @@ class VisMap:
         self.time_agglomerated_absolute_boolean_vismap = np.logical_and.reduce(
             list(self.absolute_boolean_vismap_dict.values()))
 
-
-
-    def plot_time_aggl_abs_bool_vismap(self):
+    def plot_time_aggl_abs_bool_vismap(self, size=(20, 10), bbox_pad=1, fontsize=10, display_colorbar=True):
         """
         Plot the time-agglomerated absolute boolean visibility map.
+
+        Parameters:
+        - size (tuple): Size of the figure. Default is (20, 10).
+        - bbox_pad (int): Padding for the annotation box. Default is 1.
+        - fontsize (int): Font size for the annotation. Default is 10.
+        - display_colorbar (bool): Flag to display the colorbar. Default is True.
         """
 
-        # if self.time_agglomerated_absolute_boolean_vismap == None:
-        #     self.get_time_agglomerated_absolute_boolean_vismap()
+        # Create a new figure
+        plt.figure(figsize=size)
+
+        # Define the extent of the plot
         extent = (self.all_x_coords[0], self.all_x_coords[-1], self.all_y_coords[-1], self.all_y_coords[0])
+
+        # Display background image if available
         if self.background_image is not None:
             plt.imshow(self.background_image, extent=extent)
+
+        # Define the colormap
         cmap = matplotlib.colors.ListedColormap(['red', 'green'])
 
-        plt.imshow(self.time_agglomerated_absolute_boolean_vismap, cmap=cmap, extent=extent, alpha=0.5)
+        # Display the visibility map
+        img = plt.imshow(self.time_agglomerated_absolute_boolean_vismap, cmap=cmap, extent=extent, alpha=0.5)
+
+        # Extract and plot x and y values of waypoints
         x_values = [wp.x for wp in self.way_points_list]
         y_values = [wp.y for wp in self.way_points_list]
-
         plt.plot((self.start_point[0], *x_values), (self.start_point[1], *y_values), color='darkgreen', linestyle='--')
         plt.scatter((self.start_point[0], *x_values), (self.start_point[1], *y_values), color='darkgreen')
+
+        # Annotate waypoints
         for wp_id, wp in enumerate(self.way_points_list):
-            plt.annotate(f"WP : {wp_id:>}\nC : {wp.c:>}\nIOR : {wp.ior}", xy=(wp.x + 0.3, wp.y + 1.5),
-                         bbox=dict(boxstyle="round", fc="w"), fontsize=6)
+            plt.annotate(f"WP : {wp_id:>}\nC : {wp.c:>}\nIOR : {wp.ior}",
+                         xy=(wp.x + 0.3, wp.y + 1.5),
+                         bbox=dict(boxstyle="round", fc="w", pad=bbox_pad), fontsize=fontsize)
+
+        # Set labels
         plt.xlabel("X / m")
         plt.ylabel("Y / m")
+
+        # Display colorbar if enabled
+        if display_colorbar:
+            cbar = plt.colorbar(img, orientation='horizontal', pad=0.07, aspect=32, fraction=0.055)
+            cbar.set_ticks([0, 1])
+            cbar.set_ticklabels(['Not Visible', 'Visible'])
+            cbar.set_label('Visibility of the sign')
+
+        # Display the plot
         plt.show()
