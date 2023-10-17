@@ -1,0 +1,6 @@
+ipynb_checkpoints/
+.ipynb_checkpoints/demo_fds_vismap_nb-checkpoint.ipynb
+fdsvismap/__pycache__/
+*.pyc
+examples/room_fire/fds_data/model.pickle
+*.pickle
