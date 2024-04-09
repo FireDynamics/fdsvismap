@@ -122,8 +122,8 @@ class VisMap:
         sim = fds.Simulation(self.sim_dir)
         self.slc = sim.slices.filter_by_quantity(self.quantity)[slice_id]
         self.obstructions = sim.obstructions
-        self.all_x_coords = self.slc.coordinates["x"]
-        self.all_y_coords = self.slc.coordinates["y"]
+        self.all_x_coords = self.slc.get_coordinates()['x']
+        self.all_y_coords = self.slc.get_coordinates()['y']
         self.grid_shape = (len(self.all_x_coords), (len(self.all_y_coords)))
 
     def _get_extco_array(self, time):
@@ -136,7 +136,7 @@ class VisMap:
         :rtype: np.ndarray
         """
         time_index = self.slc.get_nearest_timestep(time)
-        data = self.slc.to_global_nonuniform()[time_index]
+        data = np.flip(self.slc.to_global()[time_index], axis=1)
         extco_array = data
         return extco_array
 
@@ -183,7 +183,7 @@ class VisMap:
             n_cells = len(x_lp_idx)
             mean_extco = np.sum(extco_array * img) / n_cells
             mean_extco_array[x_id, y_id] = mean_extco
-        return mean_extco_array
+        return mean_extco_array.T
 
     def _get_dist_array(self, waypoint_id):
         """
@@ -235,7 +235,7 @@ class VisMap:
                     self.obstruction_array[x_min_id:x_max_id, y_min_id:y_max_id] = True
 
         # Mirror the obstruction_matrix horizontally
-        self.obstruction_array = np.flip(self.obstruction_array, axis=1)
+        self.obstruction_array = np.flip(obstruction_array.T, axis=0)
 
     def _get_non_concealed_cells_array(self, waypoint_id, aa=True):
         """
