@@ -204,6 +204,7 @@ class VisMap:
         self.distance_array_list.append(distance_array)
         return distance_array
 
+
     def _get_view_angle_array(self, waypoint_id):
         """
         Get the view array considering view angles.
@@ -356,7 +357,6 @@ class VisMap:
         """
         Generate an absolute boolean visibility map for all waypoints.
 
-
         :param time: Timestep for which to calculate the visibility map.
         :type time: float
         :param extinction: Flag indicating whether to consider extinction coefficients
@@ -408,8 +408,6 @@ class VisMap:
         Plot the absolute boolean visibility map.
         """
 
-        # if self.time_agglomerated_absolute_boolean_vismap == None:
-        #     self.get_time_agglomerated_absolute_boolean_vismap()
         extent = (self.all_x_coords[0], self.all_x_coords[-1], self.all_y_coords[-1], self.all_y_coords[0])
         if self.background_image is not None:
             plt.imshow(self.background_image, extent=extent)
