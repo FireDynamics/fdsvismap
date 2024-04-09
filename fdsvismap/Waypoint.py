@@ -14,10 +14,10 @@ class Waypoint:
     :type y: float
     :param c: Contrast factor for exit sign according to JIN.
     :type c: int, optional
-    :param ior: Orientation of the exit sign according to FDS orientations.
-    :type ior: int or None, optional
+    :param alpha: Orientation angle of the exit sign in the global coordinate system.
+    :type alpha: float or None, optional
     """
     x: float
     y: float
     c: float
-    ior: int
+    alpha: float

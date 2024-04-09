@@ -97,7 +97,7 @@ class VisMap:
         """
         self.start_point = (x, y)
 
-    def set_waypoint(self, x, y, c=3, ior=None):
+    def set_waypoint(self, x, y, c=3, alpha=None):
         """
         Add a waypoint to the list.
 
@@ -107,10 +107,10 @@ class VisMap:
         :type y: float
         :param c: Contrast factor for exit sign according to JIN.
         :type c: int, optional
-        :param ior: Orientation of the exit sign according to FDS orientations.
-        :type ior: int or None, optional
+        :param alpha: Orientation of the exit sign according to FDS orientations.
+        :type alpha: int or None, optional
         """
-        self.way_points_list.append(Waypoint(x, y, c, ior))
+        self.way_points_list.append(Waypoint(x, y, c, alpha))
 
     def _read_fds_data(self, slice_id=0):  #: Todo: specify slice closest to given height
         """
@@ -212,30 +212,12 @@ class VisMap:
         """
         distance_array = self._get_dist_array(waypoint_id)
         wp = self._get_waypoint(waypoint_id)
-
-        # calculate cosinus for every cell from total distance and x / y distance
-        if self.view_angle == True and wp.ior != None:
-            if wp.ior == 1 or wp.ior == -1:
-                view_angle_array = abs((self.xv - wp.x) / distance_array)
-            elif wp.ior == 2 or wp.ior == -2:
-                view_angle_array = abs((self.yv - wp.y) / distance_array)
+        if self.view_angle == True and wp.alpha != None:
+            view_angle_array = (np.sin(np.deg2rad(wp.alpha)) * (self.xv - wp.x) + np.cos(np.deg2rad(wp.alpha)) * (self.yv - wp.y)) / distance_array
         else:
             view_angle_array = np.ones_like(distance_array)
+        return view_angle_array
 
-        #  set visibility to zero on all cells that are behind the waypoint and against view direction
-        if wp.ior == -1:
-            view_array = np.where(self.xv < wp.x, view_angle_array, 0)
-        elif wp.ior == 1:
-            view_array = np.where(self.xv > wp.x, view_angle_array, 0)
-        elif wp.ior == -2:
-            view_array = np.where(self.yv < wp.y, view_angle_array, 0)
-        elif wp.ior == 2:
-            view_array = np.where(self.yv > wp.y, view_angle_array, 0)
-        else:
-            view_array = view_angle_array
-        self.view_array_list.append(view_array)
-        return view_array
-    
     def build_obstructions_array(self):
         # Initialize arrays for external collisions and cell obstructions
         meshgrid = self._get_extco_array(0)
@@ -353,16 +335,16 @@ class VisMap:
         else:
             non_concealed_cells_array = 1
         if view_angle:
-            view_array = self._get_view_angle_array(waypoint_id)
+            view_angle_array = self._get_view_angle_array(waypoint_id)
         else:
-            view_array = 1
+            view_angle_array = 1
         if extinction:
             vismap = self._get_vismap(waypoint_id, timestep)
         else:
             vismap = self.max_vis
         distance_array = self._get_dist_array(waypoint_id)
 
-        vismap_total = view_array * vismap * non_concealed_cells_array
+        vismap_total = view_angle_array * vismap * non_concealed_cells_array
         bool_vismap = np.where(vismap_total >= distance_array, True, False)
         bool_vismap = np.where(vismap_total < self.min_vis, False, bool_vismap)
         return bool_vismap
