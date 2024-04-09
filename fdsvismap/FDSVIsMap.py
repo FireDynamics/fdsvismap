@@ -280,8 +280,9 @@ class VisMap:
 
             # If line intersects obstructions, mark only the segment before the first obstruction as visible
             if obstructed_cells[0].size != 0:
-                num_vis_cells = np.where(np.in1d(line_x_idx, obstructed_cells[0]) == True)[0][0]
-                non_concealed_cells_array[line_x_idx[:num_vis_cells], line_y_idx[:num_vis_cells]] = True
+                num_non_concealed_cells = _count_cells_to_obstruction(line_x_idx, line_y_idx, obstructed_cells)
+                non_concealed_cells_array[
+                    line_x_idx[:num_non_concealed_cells], line_y_idx[:num_non_concealed_cells]] = True
             # If the line doesn't intersect any obstructions, mark the entire line as visible
             else:
                 non_concealed_cells_array[line_x_idx, line_y_idx] = True
@@ -464,4 +465,38 @@ class VisMap:
                          bbox=dict(boxstyle="round", fc="w"), fontsize=6)
         plt.xlabel("X / m")
         plt.ylabel("Y / m")
-        plt.show()
+
+
+def _count_cells_to_obstruction(line_x, line_y, obstruction):
+    """
+     Calculate the number of cells until the line intersects with an obstruction.
+
+     :param line_x: 1D array of x coordinates of the line.
+     :type line_x: np.ndarray
+     :param line_y: 1D array of y coordinates of the line.
+     :type line_y: np.ndarray
+     :param obstruction: 2D array representing the obstruction. Shape (n, 2) where n is the number of obstruction cells, each row containing [x, y] coordinates.
+     :type obstruction: np.ndarray
+     :return: The number of cells until the line intersects with the obstruction, or -1 if there's no intersection.
+     :rtype: int
+     """
+
+    line_x = np.array(line_x)
+    line_y = np.array(line_y)
+    obstruction = np.array(obstruction).T
+
+    # Create a 2D array from line_x and line_y
+    line = np.stack((line_x, line_y), axis=1)
+
+    # Use broadcasting to find differences
+    diff = line[:, np.newaxis, :] - obstruction[np.newaxis, :, :]
+
+    # Check for any zero differences (indicating a hit)
+    zero_rows = np.all(diff == 0, axis=2)
+
+    # Find if any row in `zero_rows` contains a True (indicating that the line hits the obstruction at that point)
+    hits = np.any(zero_rows, axis=1)
+
+    # Find the first occurrence of True in `hits`
+    hit_indices = np.where(hits)[0]
+    return hit_indices[0] if hit_indices.size > 0 else -1
