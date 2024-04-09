@@ -67,6 +67,7 @@ class VisMap:
         self.view_angle = True
         self.absolute_boolean_vismap_dict = {}
         self.time_agglomerated_absolute_boolean_vismap = None
+        self.num_edge_cells = 1
 
     def set_times(self, times):
         """
@@ -264,8 +265,7 @@ class VisMap:
         non_concealed_cells_array = np.zeros_like(self.obstruction_array)
         buffer_array = non_concealed_cells_array.copy()
         edge_cells = np.ones_like(self.obstruction_array)
-        # edge_cells[1:-1, 1:-1] = False
-        # edge_cells[30:-30, 30:-30] = False
+        edge_cells[self.num_edge_cells:-self.num_edge_cells, self.num_edge_cells:-self.num_edge_cells] = False
         edge_x_idx, edge_y_idx = np.where(edge_cells == True)
 
         # Choose the appropriate line function based on the aa flag
