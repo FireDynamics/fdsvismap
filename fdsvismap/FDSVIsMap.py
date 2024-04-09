@@ -385,6 +385,23 @@ class VisMap:
         """
         return self.time_agglomerated_absolute_boolean_vismap
 
+    def get_aset_map(self, max_time=None):
+        """
+        Generate a map indicating the earliest time at which each point becomes non-visible.
+
+        :param max_time: The maximum time to consider. If not specified, the last time in `self.times` is used. :type
+        max_time: int, optional :return: A 2D array where each cell represents the earliest time of non-visibility
+        for the corresponding point. Cells for points that never become non-visible are set to `max_time`.
+        :rtype: np.ndarray
+        """
+        if not max_time:
+            max_time = self.times[-1]
+        aset_map = np.full((self.grid_shape[1], self.grid_shape[0]), max_time, dtype=int)
+        for time, abs_bool_vismap in zip(self.times, self.absolute_boolean_vismap_dict.values()):
+            mask = (abs_bool_vismap == False) & (aset_map == max_time)
+            aset_map[mask] = time
+        return aset_map
+
     def plot_abs_bool_vismap(self):  # Todo: is duplicate of plot_time_agglomerated_absolute_boolean_vismap
         """
         Plot the absolute boolean visibility map.
