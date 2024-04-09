@@ -4,8 +4,8 @@ import matplotlib.pyplot as plt
 import matplotlib.colors
 
 import fdsreader as fds
-from .helper_functions import find_closest_point
-from .Waypoint import Waypoint
+from fdsvismap.helper_functions import find_closest_point
+from fdsvismap.Waypoint import Waypoint
 
 
 class VisMap:
@@ -28,8 +28,10 @@ class VisMap:
     :vartype distance_array_list: list
     :ivar vis_map_array: The array representing the visibility map. Initialized as None.
     :vartype vis_map_array: np.ndarray
-    :param ivar: Quantity of FDS slice file to be evaluated.
-    :type vartype: str
+    :ivar quantity: Quantity of FDS slice file to be evaluated.
+    :vartype quantity: str
+    :ivar num_edge_cells: Number thickness of edge cells that are considered for collision detection.
+    :vartype num_edge_cells: int
     """
 
     def __init__(self, sim_dir, min_vis=0, max_vis=30, eval_height=2):
@@ -207,7 +209,7 @@ class VisMap:
 
         :param waypoint_id: Waypoint ID.
         :type waypoint_id: int
-        :return: View array.
+        :return: Array of cosinus values of view angles
         :rtype: np.ndarray
         """
         distance_array = self._get_dist_array(waypoint_id)
@@ -221,7 +223,7 @@ class VisMap:
     def build_obstructions_array(self):
         # Initialize arrays for external collisions and cell obstructions
         meshgrid = self._get_extco_array(0)
-        self.obstruction_array = np.zeros_like(meshgrid)
+        obstruction_array = np.zeros_like(meshgrid)
 
         # Update the obstruction_matrix based on defined obstructions and their height ranges
         for obstruction in self.obstructions:
@@ -293,31 +295,31 @@ class VisMap:
         self.non_concealed_cells_xy_idx_dict[waypoint_id] = np.where(non_concealed_cells_array == True)
         return non_concealed_cells_array
 
-    def _get_vismap(self, waypoint_id, timestep):
+    def _get_vismap(self, waypoint_id, time):
         """
         Get the visibility map for a specific waypoint.
 
         :param waypoint_id: Waypoint ID.
         :type waypoint_id: int
-        :param timestep: Timestep to evaluate.
-        :type timestep: float
+        :param time: Timestep to evaluate.
+        :type time: float
         :return: Visibility map.
         :rtype: np.ndarray
         """
         wp = self._get_waypoint(waypoint_id)
-        mean_extco_array = self._get_mean_extco_array(waypoint_id, timestep)
-        vis_array = wp.c / mean_extco_array.T
+        mean_extco_array = self._get_mean_extco_array(waypoint_id, time)
+        vis_array = wp.c / mean_extco_array
         vismap = np.where(vis_array > self.max_vis, self.max_vis, vis_array).astype(float)
         return vismap
 
-    def get_bool_vismap(self, waypoint_id, timestep, extinction, view_angle, collision, aa):
+    def get_bool_vismap(self, waypoint_id, time, extinction, view_angle, collision, aa):
         """
         Generate a boolean visibility map for a specific waypoint.
 
         :param waypoint_id: ID of the waypoint.
         :type waypoint_id: int
-        :param timestep: Timestep for which to calculate the visibility map.
-        :type timestep: float
+        :param time: Timestep for which to calculate the visibility map.
+        :type time: float
         :param extinction: Flag indicating whether to consider extinction coefficients. Default is True.
         :type extinction: bool, optional
         :param view_angle: Flag indicating whether to consider view angles. Default is True.
@@ -339,7 +341,7 @@ class VisMap:
         else:
             view_angle_array = 1
         if extinction:
-            vismap = self._get_vismap(waypoint_id, timestep)
+            vismap = self._get_vismap(waypoint_id, time)
         else:
             vismap = self.max_vis
         distance_array = self._get_dist_array(waypoint_id)
@@ -441,7 +443,7 @@ class VisMap:
         plt.plot((self.start_point[0], *x_values), (self.start_point[1], *y_values), color='darkgreen', linestyle='--')
         plt.scatter((self.start_point[0], *x_values), (self.start_point[1], *y_values), color='darkgreen')
         for wp_id, wp in enumerate(self.way_points_list):
-            plt.annotate(f"WP : {wp_id:>}\nC : {wp.c:>}\nIOR : {wp.ior}", xy=(wp.x + 0.3, wp.y + 1.5),
+            plt.annotate(f"WP : {wp_id:>}\nC : {wp.c:>}\n$\\alpha$ : {wp.alpha}$^\circ$", xy=(wp.x - 0.2, wp.y + 1.5),
                          bbox=dict(boxstyle="round", fc="w"), fontsize=6)
         plt.xlabel("X / m")
         plt.ylabel("Y / m")
