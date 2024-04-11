@@ -1,0 +1,4 @@
+fds_data/
+*~
+__pycache__
+checks.json
