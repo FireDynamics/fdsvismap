@@ -1,14 +1,19 @@
-# Import fdsvismap module
+"""Example script to plot ASEP using VisMap."""
+
 from fdsvismap import VisMap
+from pathlib import Path
 import matplotlib.pyplot as plt
+
+project_root = Path(__file__).parent
+bg_img = project_root / "misc" / "floorplan.png"  # Create instance of VisMap class
+
 # Set path for FDS simulation directory and background image
-sim_dir = 'fds_data'
-bg_img = 'misc/floorplan.png' # Create instance of VisMap class
+sim_dir = str(project_root / "fds_data")
 vis = VisMap(sim_dir, max_vis=30, min_vis=0)
-vis.num_edge_cells =1
+vis.num_edge_cells = 1
 
 # Add background image
-vis.add_background_image(bg_img) #sad
+vis.add_background_image(bg_img)  # sad
 
 # Set starpoint and waypoints along escape route
 vis.set_start_point(1, 1)
