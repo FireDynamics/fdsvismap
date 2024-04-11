@@ -232,11 +232,12 @@ class VisMap:
             for sub_obstruction in obstruction:
                 _, x_range, y_range, z_range = sub_obstruction.extent
                 if z_range[0] <= self.eval_height <= z_range[1]:
-                    x_min_id = (np.abs(self.all_x_coords - x_range[0])).argmin()
-                    x_max_id = (np.abs(self.all_x_coords - x_range[1])).argmin()
-                    y_min_id = (np.abs(self.all_y_coords - y_range[0])).argmin()
-                    y_max_id = (np.abs(self.all_y_coords - y_range[1])).argmin()
-                    self.obstruction_array[x_min_id:x_max_id, y_min_id:y_max_id] = True
+                    # TODO: Find better solution than - 0.001 to avoid ambiguous results
+                    x_min_id = (np.abs(self.all_x_coords-0.001 - x_range[0])).argmin()
+                    x_max_id = (np.abs(self.all_x_coords-0.001 - x_range[1])).argmin()
+                    y_min_id = (np.abs(self.all_y_coords-0.001 - y_range[0])).argmin()
+                    y_max_id = (np.abs(self.all_y_coords-0.001 - y_range[1])).argmin()
+                    obstruction_array[x_min_id:x_max_id, y_min_id:y_max_id] = True
 
         # Mirror the obstruction_matrix horizontally
         self.obstruction_array = np.flip(obstruction_array.T, axis=0)
@@ -258,9 +259,8 @@ class VisMap:
         wp = self._get_waypoint(waypoint_id)
 
         # Find the closest grid coordinates to the target waypoint
-        closest_x_id = find_closest_point(self.all_x_coords, wp.x)
-        closest_y_id = find_closest_point(self.all_y_coords, wp.y)
-
+        closest_y_id = find_closest_point(self.all_x_coords, wp.x) # TODO: fix x / y coordinates switch
+        closest_x_id = find_closest_point(self.all_y_coords, wp.y)
 
         # Initialize arrays for the final visibility matrix, buffer matrix, and edge cell identification
         non_concealed_cells_array = np.zeros_like(self.obstruction_array)
@@ -290,9 +290,8 @@ class VisMap:
 
             # Reset the buffer matrix for the next iteration
             buffer_array.fill(0)
-
-        # Add the finalized visibility matrix to the list and return its transpose
-        non_concealed_cells_array = non_concealed_cells_array.T
+        # # Add the finalized visibility matrix to the list and return its transpose
+        # non_concealed_cells_array = non_concealed_cells_array.T
         self.non_concealed_cells_array_list.append(non_concealed_cells_array)
         self.non_concealed_cells_xy_idx_dict[waypoint_id] = np.where(non_concealed_cells_array == True)
         return non_concealed_cells_array
@@ -391,7 +390,8 @@ class VisMap:
         Generate a map indicating the earliest time at which each point becomes non-visible.
 
         :param max_time: The maximum time to consider. If not specified, the last time in `self.times` is used. :type
-        max_time: int, optional :return: A 2D array where each cell represents the earliest time of non-visibility
+        max_time: int, optional
+        :return: A 2D array where each cell represents the earliest time of non-visibility
         for the corresponding point. Cells for points that never become non-visible are set to `max_time`.
         :rtype: np.ndarray
         """
@@ -449,32 +449,6 @@ class VisMap:
             self.absolute_boolean_vismap_dict[time] = absolute_boolean_vismap
         self.time_agglomerated_absolute_boolean_vismap = np.logical_and.reduce(
             list(self.absolute_boolean_vismap_dict.values()))
-
-
-
-    def plot_time_aggl_abs_bool_vismap(self):
-        """
-        Plot the time-agglomerated absolute boolean visibility map.
-        """
-
-        # if self.time_agglomerated_absolute_boolean_vismap == None:
-        #     self.get_time_agglomerated_absolute_boolean_vismap()
-        extent = (self.all_x_coords[0], self.all_x_coords[-1], self.all_y_coords[-1], self.all_y_coords[0])
-        if self.background_image is not None:
-            plt.imshow(self.background_image, extent=extent)
-        cmap = matplotlib.colors.ListedColormap(['red', 'green'])
-
-        plt.imshow(self.time_agglomerated_absolute_boolean_vismap, cmap=cmap, extent=extent, alpha=0.5)
-        x_values = [wp.x for wp in self.way_points_list]
-        y_values = [wp.y for wp in self.way_points_list]
-
-        plt.plot((self.start_point[0], *x_values), (self.start_point[1], *y_values), color='darkgreen', linestyle='--')
-        plt.scatter((self.start_point[0], *x_values), (self.start_point[1], *y_values), color='darkgreen')
-        for wp_id, wp in enumerate(self.way_points_list):
-            plt.annotate(f"WP : {wp_id:>}\nC : {wp.c:>}\n$\\alpha$ : {wp.alpha}$^\circ$", xy=(wp.x - 0.2, wp.y + 1.5),
-                         bbox=dict(boxstyle="round", fc="w"), fontsize=6)
-        plt.xlabel("X / m")
-        plt.ylabel("Y / m")
 
 
 def _count_cells_to_obstruction(line_x, line_y, obstruction):
