@@ -403,22 +403,34 @@ class VisMap:
             aset_map[mask] = time
         return aset_map
 
-    def plot_abs_bool_vismap(self):  # Todo: is duplicate of plot_time_agglomerated_absolute_boolean_vismap
-        """
-        Plot the absolute boolean visibility map.
-        """
-
+    def _create_map_plot(self, map_array, cmap, label):
         extent = (self.all_x_coords[0], self.all_x_coords[-1], self.all_y_coords[-1], self.all_y_coords[0])
+        fig, ax = plt.subplots()
         if self.background_image is not None:
-            plt.imshow(self.background_image, extent=extent)
-        cmap = matplotlib.colors.ListedColormap(['red', 'green'])
+            ax.imshow(self.background_image, extent=extent)
+        cax = ax.imshow(map_array, cmap=cmap, alpha=0.6, extent=extent, label=label)
+        fig.colorbar(cax, ax=ax, orientation='horizontal', pad=0.15, label=label)
+        ax.set_xlabel("X / m")
+        ax.set_ylabel("Y / m")
+        return fig, ax
+    def create_aset_map_plot(self, max_time=None):
+        aset_map_array = self.get_aset_map(max_time)
+        fig, ax = self._create_map_plot(aset_map_array, 'jet_r', "Time / s")
+        return fig, ax
 
-        plt.imshow(self.absolute_boolean_vismap_dict, cmap=cmap, extent=extent, alpha=0.3)
-        x, y, _, _ = zip(*self.way_points_list)
-        plt.plot((self.start_point[0], *x), (self.start_point[1], *y), color='darkgreen', linestyle='--')
-        plt.scatter((self.start_point[0], *x), (self.start_point[1], *y), color='darkgreen')
-        plt.xlabel("X / m")
-        plt.ylabel("Y / m")
+    def create_time_aggl_abs_bool_vismap(self):
+        cmap = matplotlib.colors.ListedColormap(['red', 'green'])
+        fig, ax = self._create_map_plot(self.time_agglomerated_absolute_boolean_vismap, cmap, "Time / s")
+        x_values = [wp.x for wp in self.way_points_list]
+        y_values = [wp.y for wp in self.way_points_list]
+
+        ax.plot((self.start_point[0], *x_values), (self.start_point[1], *y_values), color='darkgreen', linestyle='--')
+        ax.scatter((self.start_point[0], *x_values), (self.start_point[1], *y_values), color='darkgreen')
+        for wp_id, wp in enumerate(self.way_points_list):
+            ax.annotate(f"WP : {wp_id:>}\nC : {wp.c:>}\n$\\alpha$ : {wp.alpha}$^\circ$", xy=(wp.x - 0.2, wp.y + 1.5),
+                         bbox=dict(boxstyle="round", fc="w"), fontsize=6)
+        return fig, ax
+
 
     def add_background_image(self, file):
         """
