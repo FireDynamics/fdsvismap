@@ -47,7 +47,8 @@ class VisMap:
         :param eval_height: The height at which to evaluate visibility. Default is 2.
         :type eval_height: float, optional
         """
-        self.times = None
+        self.vismap_time_points = None
+        self.fds_time_points = None
         self.quantity = 'ext_coef_C0.9H0.1'
         self.sim_dir = sim_dir
         self.slc = None
@@ -69,14 +70,14 @@ class VisMap:
         self.time_agglomerated_absolute_boolean_vismap = None
         self.num_edge_cells = 1
 
-    def set_times(self, times):
+    def set_time_points(self, times):
         """
         Set the times on which the simulation should be evaluated
 
         :param times: List of times in the Simulation.
         :type times: list
         """
-        self.times = times
+        self.vismap_time_points = np.array(times)
 
     def _get_waypoint(self, waypoint_id):
         """
@@ -124,6 +125,7 @@ class VisMap:
         """
         sim = fds.Simulation(self.sim_dir)
         self.slc = sim.slices.filter_by_quantity(self.quantity)[slice_id]
+        self.fds_time_points = self.slc.times
         self.obstructions = sim.obstructions
         self.all_x_coords = self.slc.get_coordinates()['x']
         self.all_y_coords = self.slc.get_coordinates()['y']
@@ -217,7 +219,8 @@ class VisMap:
         distance_array = self._get_dist_array(waypoint_id)
         wp = self._get_waypoint(waypoint_id)
         if self.view_angle == True and wp.alpha != None:
-            view_angle_array = (np.sin(np.deg2rad(wp.alpha)) * (self.xv - wp.x) + np.cos(np.deg2rad(wp.alpha)) * (self.yv - wp.y)) / distance_array
+            view_angle_array = (np.sin(np.deg2rad(wp.alpha)) * (self.xv - wp.x) + np.cos(np.deg2rad(wp.alpha)) * (
+                        self.yv - wp.y)) / distance_array
         else:
             view_angle_array = np.ones_like(distance_array)
         return view_angle_array
@@ -233,10 +236,10 @@ class VisMap:
                 _, x_range, y_range, z_range = sub_obstruction.extent
                 if z_range[0] <= self.eval_height <= z_range[1]:
                     # TODO: Find better solution than - 0.001 to avoid ambiguous results
-                    x_min_id = (np.abs(self.all_x_coords-0.001 - x_range[0])).argmin()
-                    x_max_id = (np.abs(self.all_x_coords-0.001 - x_range[1])).argmin()
-                    y_min_id = (np.abs(self.all_y_coords-0.001 - y_range[0])).argmin()
-                    y_max_id = (np.abs(self.all_y_coords-0.001 - y_range[1])).argmin()
+                    x_min_id = (np.abs(self.all_x_coords - 0.001 - x_range[0])).argmin()
+                    x_max_id = (np.abs(self.all_x_coords - 0.001 - x_range[1])).argmin()
+                    y_min_id = (np.abs(self.all_y_coords - 0.001 - y_range[0])).argmin()
+                    y_max_id = (np.abs(self.all_y_coords - 0.001 - y_range[1])).argmin()
                     obstruction_array[x_min_id:x_max_id, y_min_id:y_max_id] = True
 
         # Mirror the obstruction_matrix horizontally
@@ -396,9 +399,9 @@ class VisMap:
         :rtype: np.ndarray
         """
         if not max_time:
-            max_time = self.times[-1]
+            max_time = self.vismap_time_points[-1]
         aset_map = np.full((self.grid_shape[1], self.grid_shape[0]), max_time, dtype=int)
-        for time, abs_bool_vismap in zip(self.times, self.absolute_boolean_vismap_dict.values()):
+        for time, abs_bool_vismap in zip(self.vismap_time_points, self.absolute_boolean_vismap_dict.values()):
             mask = (abs_bool_vismap == False) & (aset_map == max_time)
             aset_map[mask] = time
         return aset_map
@@ -428,7 +431,7 @@ class VisMap:
         ax.scatter((self.start_point[0], *x_values), (self.start_point[1], *y_values), color='darkgreen')
         for wp_id, wp in enumerate(self.way_points_list):
             ax.annotate(f"WP : {wp_id:>}\nC : {wp.c:>}\n$\\alpha$ : {wp.alpha}$^\circ$", xy=(wp.x - 0.2, wp.y + 1.5),
-                         bbox=dict(boxstyle="round", fc="w"), fontsize=6)
+                        bbox=dict(boxstyle="round", fc="w"), fontsize=6)
         return fig, ax
 
 
@@ -444,7 +447,7 @@ class VisMap:
     def compute_all(self, extinction=True, view_angle=True, collision=True, aa=True):
         self._read_fds_data()
         self.build_obstructions_array()
-        for time in self.times:
+        for time in self.vismap_time_points:
             absolute_boolean_vismap = self.get_abs_bool_vismap(time, extinction, view_angle, collision, aa)
             self.absolute_boolean_vismap_dict[time] = absolute_boolean_vismap
         self.time_agglomerated_absolute_boolean_vismap = np.logical_and.reduce(
