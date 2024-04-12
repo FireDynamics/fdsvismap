@@ -2,6 +2,7 @@ import numpy as np
 from skimage.draw import line, line_aa
 import matplotlib.pyplot as plt
 import matplotlib.colors
+import matplotlib.ticker as mticker
 
 import fdsreader as fds
 from fdsvismap.helper_functions import find_closest_point
@@ -406,24 +407,28 @@ class VisMap:
             aset_map[mask] = time
         return aset_map
 
-    def _create_map_plot(self, map_array, cmap, label):
+    def _create_map_plot(self, map_array, cmap, **cbar_kwargs):
         extent = (self.all_x_coords[0], self.all_x_coords[-1], self.all_y_coords[-1], self.all_y_coords[0])
         fig, ax = plt.subplots()
         if self.background_image is not None:
             ax.imshow(self.background_image, extent=extent)
-        cax = ax.imshow(map_array, cmap=cmap, alpha=0.6, extent=extent, label=label)
-        fig.colorbar(cax, ax=ax, orientation='horizontal', pad=0.15, label=label)
+        im = ax.imshow(map_array, cmap=cmap, alpha=0.7, extent=extent)
+        fig.colorbar(mappable=im, ax=ax, orientation='horizontal', pad=0.15, **cbar_kwargs)
         ax.set_xlabel("X / m")
         ax.set_ylabel("Y / m")
         return fig, ax
+
     def create_aset_map_plot(self, max_time=None):
         aset_map_array = self.get_aset_map(max_time)
-        fig, ax = self._create_map_plot(aset_map_array, 'jet_r', "Time / s")
+        cbar_kwargs = {'label': 'Time / s'}
+        fig, ax = self._create_map_plot(map_array=aset_map_array, cmap='jet_r', **cbar_kwargs)
         return fig, ax
 
     def create_time_aggl_abs_bool_vismap(self):
         cmap = matplotlib.colors.ListedColormap(['red', 'green'])
-        fig, ax = self._create_map_plot(self.time_agglomerated_absolute_boolean_vismap, cmap, "Time / s")
+        cbar_kwargs = {'label': "Time / s", 'ticks': [0, 1], 'format':mticker.FixedFormatter(['non visible', 'visible'])}
+        fig, ax = self._create_map_plot(map_array=self.time_agglomerated_absolute_boolean_vismap, cmap=cmap,
+                                        **cbar_kwargs)
         x_values = [wp.x for wp in self.way_points_list]
         y_values = [wp.y for wp in self.way_points_list]
 
