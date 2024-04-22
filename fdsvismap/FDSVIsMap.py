@@ -518,6 +518,7 @@ class VisMap:
         self.build_obstructions_array()
         self.build_help_arrays(view_angle=view_angle, obstructions=obstructions, aa=aa)
         for time in self.vismap_time_points:
+            print(f"Simulation time {time} s of {self.vismap_time_points[-1]} s")
             wp_agg_vismap = self.get_wp_agg_vismap(time)
             self.all_time_wp_agg_vismap_list.append(wp_agg_vismap)
         self.time_agg_wp_agg_vismap = np.logical_and.reduce(self.all_time_wp_agg_vismap_list)
