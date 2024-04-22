@@ -59,14 +59,4 @@ print(vis.get_distance_to_wp(17, 5, 2))
 # Calculate local visibility at given location and time, considering a specific c factor
 print(vis.get_local_visibility(100, 5, 6, 3))
 
-
-# Set times when the simulation should be evaluated
-vis.set_time_points([0, 60, 120])
-
-# Do the required calculations to create the Vismap 
-vis.compute_all()
-
-# Plot time agglomerated absolute boolean vismap
-vis.plot_time_aggl_abs_bool_vismap()
-
 ```
