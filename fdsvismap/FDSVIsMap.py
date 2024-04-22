@@ -429,7 +429,7 @@ class VisMap:
             aset_map[mask] = time
         return aset_map
 
-    def _create_map_plot(self, map_array, cmap, **cbar_kwargs):
+    def _create_map_plot(self, map_array, cmap, plot_obstructions, **cbar_kwargs):
         """
         Create a labeled matplotlib plot of a given map array using a specified colormap and colorbar settings.
 
@@ -439,6 +439,8 @@ class VisMap:
         :type cmap: str or matplotlib.colors.Colormap
         :param cbar_kwargs: Keyword arguments for configuring the colorbar (e.g., label, orientation).
                             These are passed directly to `fig.colorbar()`.
+        :param plot_obstructions: Flag indicating whether obstruction at the evaluation height should be plotted or not.
+        :type plot_obstructions: bool, optional
         :type cbar_kwargs: dict
         :return: A tuple containing the matplotlib figure and axes objects.
         :rtype: (matplotlib.figure.Figure, matplotlib.axes._subplots.AxesSubplot)
@@ -448,39 +450,46 @@ class VisMap:
         fig, ax = plt.subplots()
         if self.background_image is not None:
             ax.imshow(self.background_image, extent=extent)
+        if plot_obstructions:
+            ax.imshow(self.obstructions_array, extent=extent, cmap='Grays')
         im = ax.imshow(map_array, cmap=cmap, alpha=0.7, extent=extent)
+
         fig.colorbar(mappable=im, ax=ax, orientation='horizontal', pad=0.15, **cbar_kwargs)
         ax.set_xlabel("X / m")
         ax.set_ylabel("Y / m")
         return fig, ax
 
-    def create_aset_map_plot(self, max_time=None):
+    def create_aset_map_plot(self, max_time=None, plot_obstructions=False):
         """
         Create a plot visualizing the ASET map (Available Safe Egress Time) map indicating for each cell the first time any waypoint is not visible.
 
         :param max_time: The maximum time value to consider for the ASET calculations. If None, it defaults to the last time in the visibility data.
         :type max_time: int, optional
+        :param plot_obstructions: Flag indicating whether obstruction at the evaluation height should be plotted or not.
+        :type plot_obstructions: bool, optional
         :return: A tuple containing the matplotlib figure and axes objects that display the ASET map.
         :rtype: (matplotlib.figure.Figure, matplotlib.axes._subplots.AxesSubplot)
         """
         aset_map_array = self.get_aset_map(max_time)
         cbar_kwargs = {'label': 'Time / s'}
-        fig, ax = self._create_map_plot(map_array=aset_map_array, cmap='jet_r', **cbar_kwargs)
+        fig, ax = self._create_map_plot(map_array=aset_map_array, cmap='jet_r', plot_obstructions=plot_obstructions, **cbar_kwargs)
         return fig, ax
 
-    def create_time_agg_wp_agg_vismap(self):
+    def create_time_agg_wp_agg_vismap(self, plot_obstructions=False):
         """
         Create a plot visualizing the time-aggregated visibility map for all waypoints. The map uses a custom color
         map to distinguish whether any waypoint is visible (green) or not (red) from each cell. The plot also
         features the trajectory of movement from the start point through all waypoints, highlighted with annotations
         for each waypoint.
 
+        :param plot_obstructions: Flag indicating whether obstruction at the evaluation height should be plotted or not.
+        :type plot_obstructions: bool, optional
         :return: A tuple containing the matplotlib figure and axes objects that display the aggregated visibility map.
         :rtype: (matplotlib.figure.Figure, matplotlib.axes._subplots.AxesSubplot)
         """
         cmap = matplotlib.colors.ListedColormap(['red', 'green'])
         cbar_kwargs = {'label': None, 'ticks': [0, 1], 'format': mticker.FixedFormatter(['non visible', 'visible'])}
-        fig, ax = self._create_map_plot(map_array=self.time_agg_wp_agg_vismap, cmap=cmap,
+        fig, ax = self._create_map_plot(map_array=self.time_agg_wp_agg_vismap, cmap=cmap, plot_obstructions=plot_obstructions,
                                         **cbar_kwargs)
         x_values = [wp.x for wp in self.all_wp_list]
         y_values = [wp.y for wp in self.all_wp_list]
