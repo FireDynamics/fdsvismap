@@ -1,9 +1,14 @@
+"""Example script to create visibility maps."""
+
 from fdsvismap import VisMap
+from pathlib import Path
 import matplotlib.pyplot as plt
 
+project_root = Path(__file__).parent
+bg_img = project_root / "misc" / "floorplan.png"  # Create instance of VisMap class
+
 # Set path for FDS simulation directory and background image
-sim_dir = 'fds_data'
-bg_img = 'misc/floorplan.png'
+sim_dir = str(project_root / "fds_data")
 
 # Create instance of VisMap class
 vis = VisMap()
