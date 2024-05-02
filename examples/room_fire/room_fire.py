@@ -12,6 +12,7 @@ sim_dir = str(project_root / "fds_data")
 
 # Create instance of VisMap class
 vis = VisMap()
+vis.quantity = 'SOOT EXTINCTION COEFFICIENT'
 
 # Read data from FDS simulation directory
 vis.read_fds_data(sim_dir)
@@ -29,11 +30,12 @@ vis.set_waypoint(17, 0, 3, 0)
 times = range(0, 500, 50)
 vis.set_time_points(times)
 
+vis.add_visual_obstruction(8, 8.8, 8.6, 8.8)
 # Do the required calculations to create the Vismap
 vis.compute_all()
 
 # # Plot ASET map based on Vismaps and save as pdf
-fig, ax = vis.create_aset_map_plot()
+fig, ax = vis.create_aset_map_plot(plot_obstructions=True)
 ax.set_xlim(0, 20)
 ax.set_ylim(10, 0)
 plt.savefig('aset_map.pdf', dpi=300)
