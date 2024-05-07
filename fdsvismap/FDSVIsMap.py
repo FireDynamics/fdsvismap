@@ -89,7 +89,9 @@ class VisMap:
         self.all_time_wp_agg_vismap_list = []
         self.time_agg_wp_agg_vismap = None
         self.num_edge_cells = 1
-        self.cell_size = (0.2, 0.2, 0.2)
+        self.cell_size = None
+        self.extent = None
+
 
     def set_time_points(self, time_points):
         """
@@ -150,11 +152,13 @@ class VisMap:
         """
         sim = fds.Simulation(sim_dir)
         self.slc = sim.slices.filter_by_quantity(self.quantity)[slice_id]
-        self.fds_time_points = self.slc.times
-        self.obstructions_collection = sim.obstructions
+        self.extent = np.array(self.slc.extent._extents)
         self.all_x_coords = self.slc.get_coordinates()['x']
         self.all_y_coords = self.slc.get_coordinates()['y']
         self.fds_grid_shape = (len(self.all_x_coords), (len(self.all_y_coords)))
+        self.cell_size = ((self.extent[0,1]-self.extent[0,0])/self.fds_grid_shape[0], (self.extent[1,1]-self.extent[1,0])/self.fds_grid_shape[1])
+        self.fds_time_points = self.slc.times
+        self.obstructions_collection = sim.obstructions
         self.fds_slc_height = fds_slc_height
         self.build_obstructions_array()
 
