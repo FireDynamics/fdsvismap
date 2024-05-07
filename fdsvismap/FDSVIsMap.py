@@ -263,21 +263,8 @@ class VisMap:
             for sub_obstruction in obstruction:
                 _, x_range, y_range, z_range = sub_obstruction.extent
                 if z_range[0] <= self.fds_slc_height <= z_range[1]:
-                    # TODO: Find better solution than - 0.001 to avoid ambiguous results
-                    # x_min_id = get_id_of_closest_value(self.all_x_coords, x_range[0] + self.cell_size[0]/2)
-                    # x_max_id = get_id_of_closest_value(self.all_x_coords, x_range[1] - self.cell_size[0]/2)
-                    # y_min_id = get_id_of_closest_value(self.all_y_coords, y_range[0] + self.cell_size[1]/2)
-                    # y_max_id = get_id_of_closest_value(self.all_y_coords, y_range[1] - self.cell_size[1]/2)
-
-                    x_min_id = (np.abs(self.all_x_coords - 0.001 - x_range[0])).argmin()
-                    x_max_id = (np.abs(self.all_x_coords - 0.001 - x_range[1])).argmin()
-                    y_min_id = (np.abs(self.all_y_coords - 0.001 - y_range[0])).argmin()
-                    y_max_id = (np.abs(self.all_y_coords - 0.001 - y_range[1])).argmin()
-                    print(x_range[0] + self.cell_size[0]/2, x_range[1] + self.cell_size[0]/2, y_range[0] + self.cell_size[1]/2, y_range[1] + self.cell_size[1]/2)
-                    obstruction_array[x_min_id:x_max_id, y_min_id:y_max_id] = True
-
-        # Mirror the obstruction_matrix horizontally
-        self.obstructions_array = np.flip(obstruction_array.T, axis=0)
+                    obstruction_array = self._add_visual_object(x_range[0], x_range[1], y_range[0], y_range[1], obstruction_array, True)
+        self.obstructions_array = obstruction_array
 
     def build_help_arrays(self, obstructions, view_angle, aa):
         """
@@ -624,6 +611,34 @@ class VisMap:
         distance_to_wp = distance_array[ref_y_id, ref_x_id]
         return distance_to_wp
 
+    def _add_visual_object(self, x1, x2, y1, y2, obstructions_array, status):
+        """
+        Add or remove obstructions from a specified rectangular area within the simulation grid. This is valid for
+        everything affected by the ray tracing algorithms.
+
+        :param x1: The x-coordinate of the first corner of the rectangle.
+        :type x1: float
+        :param x2: The x-coordinate of the opposite corner of the rectangle.
+        :type x2: float
+        :param y1: The y-coordinate of the first corner of the rectangle.
+        :type y1: float
+        :param y2: The y-coordinate of the opposite corner of the rectangle.
+        :type y2: float
+        :param obstructions_array: The array representing obstructions in the simulation area.
+        :type obstructions_array: np.ndarray
+        :param status: The boolean status to apply within the specified rectangle (True for obstructed, False for clear).
+        :type status: bool
+        :return: The modified obstructions array with the newly added or removed object.
+        :rtype: np.ndarray
+
+        """
+        ref_x1_id = get_id_of_closest_value(self.all_x_coords, x1 + self.cell_size[0]/2)
+        ref_x2_id = get_id_of_closest_value(self.all_x_coords, x2 - self.cell_size[0]/2) + 1
+        ref_y1_id = get_id_of_closest_value(self.all_y_coords, y1 + self.cell_size[0]/2)
+        ref_y2_id = get_id_of_closest_value(self.all_y_coords, y2 - self.cell_size[0]/2) + 1
+        obstructions_array[ref_y1_id:ref_y2_id, ref_x1_id:ref_x2_id] = status
+        return obstructions_array
+
     def add_visual_hole(self, x1, x2, y1, y2):
         """
         Remove obstructions from a specified rectangular area within the simulation grid. This is valid for
@@ -639,11 +654,8 @@ class VisMap:
         :type y2: float
 
         """
-        ref_x1_id = get_id_of_closest_value(self.all_x_coords, x1)
-        ref_y1_id = get_id_of_closest_value(self.all_y_coords, y1)
-        ref_x2_id = get_id_of_closest_value(self.all_x_coords, x2)
-        ref_y2_id = get_id_of_closest_value(self.all_y_coords, y2)
-        self.obstructions_array[ref_y1_id:ref_y2_id, ref_x1_id:ref_x2_id] = False
+        self._add_visual_object(x1, x2, y1, y2, self.obstructions_array, False)
+
 
     def add_visual_obstruction(self, x1, x2, y1, y2):
         """
@@ -660,8 +672,4 @@ class VisMap:
         :type y2: float
 
         """
-        ref_x1_id = get_id_of_closest_value(self.all_x_coords, x1)
-        ref_y1_id = get_id_of_closest_value(self.all_y_coords, y1)
-        ref_x2_id = get_id_of_closest_value(self.all_x_coords, x2)
-        ref_y2_id = get_id_of_closest_value(self.all_y_coords, y2)
-        self.obstructions_array[ref_y1_id:ref_y2_id, ref_x1_id:ref_x2_id] = True
+        self._add_visual_object(x1, x2, y1, y2, self.obstructions_array, True)
