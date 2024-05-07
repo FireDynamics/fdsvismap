@@ -21,38 +21,48 @@ vis.read_fds_data(sim_dir)
 vis.add_background_image(bg_img)
 
 # Set starpoint and waypoints along escape route
-vis.set_start_point(1, 1)
-vis.set_waypoint(8, 5, 3, 180)
-vis.set_waypoint(9.8, 6, 3, 270)
-vis.set_waypoint(17, 0, 3, 0)
+vis.set_start_point(1, 9)
+vis.set_waypoint(8.4, 4.8, 3, 0)
+vis.set_waypoint(9.8, 4, 3, 270)
+vis.set_waypoint(17, 10, 3, 180)
 
 # Set times when the simulation should be evaluated
 times = range(0, 500, 50)
 vis.set_time_points(times)
 
-vis.add_visual_obstruction(8, 8.8, 8.6, 8.8)
+vis.add_visual_obstruction(8, 8.8, 4.6, 4.8)
 # Do the required calculations to create the Vismap
 vis.compute_all()
 
 # # Plot ASET map based on Vismaps and save as pdf
 fig, ax = vis.create_aset_map_plot(plot_obstructions=True)
 ax.set_xlim(0, 20)
-ax.set_ylim(10, 0)
+ax.set_ylim(0, 10)
 plt.savefig('aset_map.pdf', dpi=300)
 plt.close()
 
 # # Plot time and waypoint aggregated  Vismap
-fig, ax = vis.create_time_agg_wp_agg_vismap()
+fig, ax = vis.create_time_agg_wp_agg_vismap_plot()
 ax.set_xlim(0, 20)
-ax.set_ylim(10, 0)
+ax.set_ylim(0, 10)
 plt.savefig('time_agg_wp_agg_vismap.pdf', dpi=300)
 plt.close()
 
+time = 500
+x = 2
+y = 4
+waypoint_id = 1
+
+print("\n")
+
 # Check if waypoint is visible from given location at given time
-print(vis.wp_is_visible(50, 12.5, 0.6, 2))
+wp_is_visible = vis.wp_is_visible(500, 2, 4, 1)
+print(f"Is waypoint {waypoint_id} visible at {time} s at coordinates X/Y = ({x},{y})?: {wp_is_visible}")
 
 # Get distance from waypoint to given location
-print(vis.get_distance_to_wp(17, 5, 2))
+distance_top_wp = vis.get_distance_to_wp(17, 5, 2)
+print(f"The distance from waypoint {waypoint_id} to location X/Y = ({x},{y}) is {distance_top_wp} m.")
 
 # Calculate local visibility at given location and time, considering a specific c factor
-print(vis.get_local_visibility(100, 5, 6, 3))
+local_visibility = vis.get_local_visibility(400, 2, 4, 3)
+print(f"The local visibility at location X/Y = ({x},{y}) is {local_visibility:.2f} m.")
