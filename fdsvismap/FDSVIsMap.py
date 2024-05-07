@@ -593,24 +593,22 @@ class VisMap:
 
     def get_distance_to_wp(self, x, y, waypoint_id):
         """
-         Calculate the distance from a specific cell closest to the given x, y coordinates to a designated waypoint.
+        Calculate the distance from a specific cell closest to the given x, y coordinates to a designated waypoint.
 
-         :param x: The x-coordinate of the location from which to measure distance.
-         :type x: float
-         :param y: The y-coordinate of the location from which to measure distance.
-         :type y: float
-         :param waypoint_id: The ID of the waypoint to which distance is measured.
-         :type waypoint_id: int
-         :return: The distance to the waypoint from the specified location.
-         :rtype: float
+        :param x: The x-coordinate of the location from which to measure distance.
+        :type x: float
+        :param y: The y-coordinate of the location from which to measure distance.
+        :type y: float
+        :param waypoint_id: The ID of the waypoint to which distance is measured.
+        :type waypoint_id: int
+        :return: The distance to the waypoint from the specified location.
+        :rtype: float
 
-         The distance value is useful for navigation, proximity checks, or any scenario where the physical distance
-         to a waypoint is relevant for decision-making or analysis.
-         """
-        ref_x_id = get_id_of_closest_value(self.all_x_coords, x)
-        ref_y_id = get_id_of_closest_value(self.all_y_coords, y)
-        distance_array = self.all_wp_distance_array_list[waypoint_id]
-        distance_to_wp = distance_array[ref_y_id, ref_x_id]
+        The distance value is useful for navigation, proximity checks, or any scenario where the physical distance
+        to a waypoint is relevant for decision-making or analysis.
+        """
+        wp = self.all_wp_list[waypoint_id]
+        distance_to_wp = np.linalg.norm(np.array([x - wp.x, y - wp.y]), axis=0)
         return distance_to_wp
 
     def _add_visual_object(self, x1, x2, y1, y2, obstructions_array, status):
