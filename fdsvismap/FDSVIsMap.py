@@ -168,7 +168,7 @@ class VisMap:
         :rtype: np.ndarray
         """
         time_index = self.slc.get_nearest_timestep(time)
-        extco_array = np.flip(self.slc.to_global()[time_index], axis=1)
+        extco_array = self.slc.to_global()[time_index]
         return extco_array
 
     def _get_non_concealed_cells_idx(self, waypoint_id):
@@ -252,7 +252,7 @@ class VisMap:
         """
         # Initialize arrays for external collisions and cell obstructions
         meshgrid = self._get_extco_array_at_time(0)
-        obstruction_array = np.zeros_like(meshgrid)
+        obstruction_array = np.zeros_like(meshgrid).T
 
         # Update the obstruction_matrix based on defined obstructions and their height ranges
         for obstruction in self.obstructions_collection:
@@ -437,7 +437,7 @@ class VisMap:
             aset_map[mask] = time
         return aset_map
 
-    def _create_map_plot(self, map_array, cmap, plot_obstructions, **cbar_kwargs):
+    def _create_map_plot(self, map_array, cmap, plot_obstructions, flip_y_axis,  **cbar_kwargs):
         """
         Create a labeled matplotlib plot of a given map array using a specified colormap and colorbar settings.
 
@@ -449,25 +449,31 @@ class VisMap:
                             These are passed directly to `fig.colorbar()`.
         :param plot_obstructions: Flag indicating whether obstruction at the evaluation height should be plotted or not.
         :type plot_obstructions: bool, optional
+        :param flip_y_axis: Flag indicating whether y-axis should be flipped or not to have the origin at bottom left.
+        :type flip_y_axis:  bool, optional
         :type cbar_kwargs: dict
         :return: A tuple containing the matplotlib figure and axes objects.
         :rtype: (matplotlib.figure.Figure, matplotlib.axes._subplots.AxesSubplot)
 
         """
-        extent = (self.all_x_coords[0], self.all_x_coords[-1], self.all_y_coords[-1], self.all_y_coords[0])
+        origin = "lower" if flip_y_axis else "upper"
+        if flip_y_axis:
+            extent = (self.all_x_coords[0], self.all_x_coords[-1], self.all_y_coords[0], self.all_y_coords[-1])
+        else:
+            extent = (self.all_x_coords[0], self.all_x_coords[-1], self.all_y_coords[-1], self.all_y_coords[0])
         fig, ax = plt.subplots()
         if self.background_image is not None:
-            ax.imshow(self.background_image, extent=extent)
+            ax.imshow(self.background_image, extent=extent, origin=origin)
         if plot_obstructions:
-            ax.imshow(self.obstructions_array, extent=extent, cmap='Grays')
-        im = ax.imshow(map_array, cmap=cmap, alpha=0.7, extent=extent)
+            ax.imshow(self.obstructions_array, extent=extent, cmap='Grays', alpha=0.5, origin=origin)
+        im = ax.imshow(map_array, cmap=cmap, alpha=0.7, extent=extent, origin=origin)
 
         fig.colorbar(mappable=im, ax=ax, orientation='horizontal', pad=0.15, **cbar_kwargs)
         ax.set_xlabel("X / m")
         ax.set_ylabel("Y / m")
         return fig, ax
 
-    def create_aset_map_plot(self, max_time=None, plot_obstructions=False):
+    def create_aset_map_plot(self, max_time=None, plot_obstructions=False, flip_y_axis=True):
         """
         Create a plot visualizing the ASET map (Available Safe Egress Time) map indicating for each cell the first time any waypoint is not visible.
 
@@ -475,15 +481,18 @@ class VisMap:
         :type max_time: int, optional
         :param plot_obstructions: Flag indicating whether obstruction at the evaluation height should be plotted or not.
         :type plot_obstructions: bool, optional
+        :param flip_y_axis: Flag indicating whether y-axis should be flipped or not to have the origin at bottom left.
+        :type flip_y_axis:  bool, Default is True.
         :return: A tuple containing the matplotlib figure and axes objects that display the ASET map.
         :rtype: (matplotlib.figure.Figure, matplotlib.axes._subplots.AxesSubplot)
         """
         aset_map_array = self.get_aset_map(max_time)
         cbar_kwargs = {'label': 'Time / s'}
-        fig, ax = self._create_map_plot(map_array=aset_map_array, cmap='jet_r', plot_obstructions=plot_obstructions, **cbar_kwargs)
+        fig, ax = self._create_map_plot(map_array=aset_map_array, cmap='jet_r', plot_obstructions=plot_obstructions,
+                                        flip_y_axis=flip_y_axis, **cbar_kwargs)
         return fig, ax
 
-    def create_time_agg_wp_agg_vismap(self, plot_obstructions=False):
+    def create_time_agg_wp_agg_vismap_plot(self, plot_obstructions=False, flip_y_axis=True):
         """
         Create a plot visualizing the time-aggregated visibility map for all waypoints. The map uses a custom color
         map to distinguish whether any waypoint is visible (green) or not (red) from each cell. The plot also
@@ -492,13 +501,15 @@ class VisMap:
 
         :param plot_obstructions: Flag indicating whether obstruction at the evaluation height should be plotted or not.
         :type plot_obstructions: bool, optional
+        :param flip_y_axis: Flag indicating whether y-axis should be flipped or not to have the origin at bottom left.
+        :type flip_y_axis:  bool, Default is True.
         :return: A tuple containing the matplotlib figure and axes objects that display the aggregated visibility map.
         :rtype: (matplotlib.figure.Figure, matplotlib.axes._subplots.AxesSubplot)
         """
         cmap = matplotlib.colors.ListedColormap(['red', 'green'])
         cbar_kwargs = {'label': None, 'ticks': [0, 1], 'format': mticker.FixedFormatter(['non visible', 'visible'])}
         fig, ax = self._create_map_plot(map_array=self.time_agg_wp_agg_vismap, cmap=cmap, plot_obstructions=plot_obstructions,
-                                        **cbar_kwargs)
+                                        flip_y_axis=flip_y_axis, **cbar_kwargs)
         x_values = [wp.x for wp in self.all_wp_list]
         y_values = [wp.y for wp in self.all_wp_list]
 
@@ -516,7 +527,7 @@ class VisMap:
         :param file: Path to the image file that will be used as the background.
         :type file: str
         """
-        self.background_image = plt.imread(file)
+        self.background_image = np.flip(plt.imread(file), axis=0)
 
     def compute_all(self, view_angle=True, obstructions=True, aa=True):
         """
