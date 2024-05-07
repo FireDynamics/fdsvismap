@@ -386,24 +386,19 @@ class VisMap:
 
     def get_wp_agg_vismap(self, time):
         """
-        Generate a waypoint aggregated bool type visibility map for a specific point in time.
+        Get a waypoint aggregated bool type visibility map for a specific point in time.
 
         :param time: Timestep for which to calculate the visibility map.
         :type time: float
         :return: Waypoint aggregated bool type visibility map.
         :rtype: np.ndarray
         """
-        all_wp_vismap_array_list = []
-        for waypoint_id, waypoint in enumerate(self.all_wp_list):
-            vismap = self.get_vismap(waypoint_id, time)
-            all_wp_vismap_array_list.append(vismap)
-            self.all_time_all_wp_vismap_array_list.append(all_wp_vismap_array_list)  # Added for API
-            wp_agg_vismap = np.logical_or.reduce(all_wp_vismap_array_list)
-        return wp_agg_vismap
+        time_id = get_id_of_closest_value(self.vismap_time_points, time)
+        return self.all_time_wp_agg_vismap_list[time_id]
 
     def get_time_agg_wp_agg_vismap(self):
         """
-        Calculate the time-aggregated and waypoint-aggregated boolean visibility map.
+        Get a time-aggregated and waypoint-aggregated boolean visibility map.
 
         :return: Time-aggregated and waypoint-aggregated boolean visibility map.
         :rtype: np.ndarray
@@ -537,8 +532,15 @@ class VisMap:
         self.build_help_arrays(view_angle=view_angle, obstructions=obstructions, aa=aa)
         for time in self.vismap_time_points:
             print(f"Simulation time {time} s of {self.vismap_time_points[-1]} s")
-            wp_agg_vismap = self.get_wp_agg_vismap(time)
+            all_wp_vismap_array_list = []
+            for waypoint_id, waypoint in enumerate(self.all_wp_list):
+                print(f"Waypoint {waypoint_id}", end=" ")
+                vismap = self.get_vismap(waypoint_id, time)
+                all_wp_vismap_array_list.append(vismap)
+            self.all_time_all_wp_vismap_array_list.append(all_wp_vismap_array_list)
+            wp_agg_vismap = np.logical_or.reduce(all_wp_vismap_array_list)
             self.all_time_wp_agg_vismap_list.append(wp_agg_vismap)
+            print("")
         self.time_agg_wp_agg_vismap = np.logical_and.reduce(self.all_time_wp_agg_vismap_list)
 
     def get_local_visibility(self, time, x, y, c):
