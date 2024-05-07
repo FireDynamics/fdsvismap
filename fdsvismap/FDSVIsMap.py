@@ -502,7 +502,7 @@ class VisMap:
         ax.plot((self.start_point[0], *x_values), (self.start_point[1], *y_values), color='darkgreen', linestyle='--')
         ax.scatter((self.start_point[0], *x_values), (self.start_point[1], *y_values), color='darkgreen')
         for wp_id, wp in enumerate(self.all_wp_list):
-            ax.annotate(f"WP : {wp_id:>}\nC : {wp.c:>}\n$\\alpha$ : {wp.alpha}$^\circ$", xy=(wp.x - 0.2, wp.y + 1.5),
+            ax.annotate(f"WP : {wp_id:>}\nC : {wp.c:>}\n$\\alpha$ : {wp.alpha}$^\\circ$", xy=(wp.x - 0.2, wp.y - 1.5),
                         bbox=dict(boxstyle="round", fc="w"), fontsize=6)
         return fig, ax
 
