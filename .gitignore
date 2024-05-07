@@ -8,9 +8,10 @@ __pycache__
 
 # sphinx build directory #
 ##########################
-doc/_build
+docs/build
 
 # Pre-computed Simulation data  #
 #################################
 fds_data/
+
 
