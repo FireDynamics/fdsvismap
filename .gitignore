@@ -1,4 +1,17 @@
-fds_data/
-*~
+# Python files #
+################
 __pycache__
-checks.json
+
+# OS-specific temporary and backup files #
+##########################################
+.DS_Store
+
+# sphinx build directory #
+##########################
+docs/build
+
+# Pre-computed Simulation data  #
+#################################
+fds_data/
+
+

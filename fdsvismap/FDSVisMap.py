@@ -89,6 +89,9 @@ class VisMap:
         self.all_time_wp_agg_vismap_list = []
         self.time_agg_wp_agg_vismap = None
         self.num_edge_cells = 1
+        self.cell_size = None
+        self.extent = None
+
 
     def set_time_points(self, time_points):
         """
@@ -149,12 +152,15 @@ class VisMap:
         """
         sim = fds.Simulation(sim_dir)
         self.slc = sim.slices.filter_by_quantity(self.quantity)[slice_id]
-        self.fds_time_points = self.slc.times
-        self.obstructions_collection = sim.obstructions
+        self.extent = np.array(self.slc.extent._extents)
         self.all_x_coords = self.slc.get_coordinates()['x']
         self.all_y_coords = self.slc.get_coordinates()['y']
         self.fds_grid_shape = (len(self.all_x_coords), (len(self.all_y_coords)))
+        self.cell_size = ((self.extent[0,1]-self.extent[0,0])/self.fds_grid_shape[0], (self.extent[1,1]-self.extent[1,0])/self.fds_grid_shape[1])
+        self.fds_time_points = self.slc.times
+        self.obstructions_collection = sim.obstructions
         self.fds_slc_height = fds_slc_height
+        self.build_obstructions_array()
 
     def _get_extco_array_at_time(self, time):
         """
@@ -166,7 +172,7 @@ class VisMap:
         :rtype: np.ndarray
         """
         time_index = self.slc.get_nearest_timestep(time)
-        extco_array = np.flip(self.slc.to_global()[time_index], axis=1)
+        extco_array = self.slc.to_global()[time_index]
         return extco_array
 
     def _get_non_concealed_cells_idx(self, waypoint_id):
@@ -250,22 +256,15 @@ class VisMap:
         """
         # Initialize arrays for external collisions and cell obstructions
         meshgrid = self._get_extco_array_at_time(0)
-        obstruction_array = np.zeros_like(meshgrid)
+        obstruction_array = np.zeros_like(meshgrid).T
 
         # Update the obstruction_matrix based on defined obstructions and their height ranges
         for obstruction in self.obstructions_collection:
             for sub_obstruction in obstruction:
                 _, x_range, y_range, z_range = sub_obstruction.extent
                 if z_range[0] <= self.fds_slc_height <= z_range[1]:
-                    # TODO: Find better solution than - 0.001 to avoid ambiguous results
-                    x_min_id = (np.abs(self.all_x_coords - 0.001 - x_range[0])).argmin()
-                    x_max_id = (np.abs(self.all_x_coords - 0.001 - x_range[1])).argmin()
-                    y_min_id = (np.abs(self.all_y_coords - 0.001 - y_range[0])).argmin()
-                    y_max_id = (np.abs(self.all_y_coords - 0.001 - y_range[1])).argmin()
-                    obstruction_array[x_min_id:x_max_id, y_min_id:y_max_id] = True
-
-        # Mirror the obstruction_matrix horizontally
-        self.obstructions_array = np.flip(obstruction_array.T, axis=0)
+                    obstruction_array = self._add_visual_object(x_range[0], x_range[1], y_range[0], y_range[1], obstruction_array, True)
+        self.obstructions_array = obstruction_array
 
     def build_help_arrays(self, obstructions, view_angle, aa):
         """
@@ -387,24 +386,19 @@ class VisMap:
 
     def get_wp_agg_vismap(self, time):
         """
-        Generate a waypoint aggregated bool type visibility map for a specific point in time.
+        Get a waypoint aggregated bool type visibility map for a specific point in time.
 
         :param time: Timestep for which to calculate the visibility map.
         :type time: float
         :return: Waypoint aggregated bool type visibility map.
         :rtype: np.ndarray
         """
-        all_wp_vismap_array_list = []
-        for waypoint_id, waypoint in enumerate(self.all_wp_list):
-            vismap = self.get_vismap(waypoint_id, time)
-            all_wp_vismap_array_list.append(vismap)
-            self.all_time_all_wp_vismap_array_list.append(all_wp_vismap_array_list)  # Added for API
-            wp_agg_vismap = np.logical_or.reduce(all_wp_vismap_array_list)
-        return wp_agg_vismap
+        time_id = get_id_of_closest_value(self.vismap_time_points, time)
+        return self.all_time_wp_agg_vismap_list[time_id]
 
     def get_time_agg_wp_agg_vismap(self):
         """
-        Calculate the time-aggregated and waypoint-aggregated boolean visibility map.
+        Get a time-aggregated and waypoint-aggregated boolean visibility map.
 
         :return: Time-aggregated and waypoint-aggregated boolean visibility map.
         :rtype: np.ndarray
@@ -429,7 +423,7 @@ class VisMap:
             aset_map[mask] = time
         return aset_map
 
-    def _create_map_plot(self, map_array, cmap, plot_obstructions, **cbar_kwargs):
+    def _create_map_plot(self, map_array, cmap, plot_obstructions, flip_y_axis,  **cbar_kwargs):
         """
         Create a labeled matplotlib plot of a given map array using a specified colormap and colorbar settings.
 
@@ -441,25 +435,31 @@ class VisMap:
                             These are passed directly to `fig.colorbar()`.
         :param plot_obstructions: Flag indicating whether obstruction at the evaluation height should be plotted or not.
         :type plot_obstructions: bool, optional
+        :param flip_y_axis: Flag indicating whether y-axis should be flipped or not to have the origin at bottom left.
+        :type flip_y_axis:  bool, optional
         :type cbar_kwargs: dict
         :return: A tuple containing the matplotlib figure and axes objects.
         :rtype: (matplotlib.figure.Figure, matplotlib.axes._subplots.AxesSubplot)
 
         """
-        extent = (self.all_x_coords[0], self.all_x_coords[-1], self.all_y_coords[-1], self.all_y_coords[0])
+        origin = "lower" if flip_y_axis else "upper"
+        if flip_y_axis:
+            extent = (self.all_x_coords[0], self.all_x_coords[-1], self.all_y_coords[0], self.all_y_coords[-1])
+        else:
+            extent = (self.all_x_coords[0], self.all_x_coords[-1], self.all_y_coords[-1], self.all_y_coords[0])
         fig, ax = plt.subplots()
         if self.background_image is not None:
-            ax.imshow(self.background_image, extent=extent)
+            ax.imshow(self.background_image, extent=extent, origin=origin)
         if plot_obstructions:
-            ax.imshow(self.obstructions_array, extent=extent, cmap='Grays')
-        im = ax.imshow(map_array, cmap=cmap, alpha=0.7, extent=extent)
+            ax.imshow(self.obstructions_array, extent=extent, cmap='Grays', alpha=0.5, origin=origin)
+        im = ax.imshow(map_array, cmap=cmap, alpha=0.7, extent=extent, origin=origin)
 
         fig.colorbar(mappable=im, ax=ax, orientation='horizontal', pad=0.15, **cbar_kwargs)
         ax.set_xlabel("X / m")
         ax.set_ylabel("Y / m")
         return fig, ax
 
-    def create_aset_map_plot(self, max_time=None, plot_obstructions=False):
+    def create_aset_map_plot(self, max_time=None, plot_obstructions=False, flip_y_axis=True):
         """
         Create a plot visualizing the ASET map (Available Safe Egress Time) map indicating for each cell the first time any waypoint is not visible.
 
@@ -467,15 +467,18 @@ class VisMap:
         :type max_time: int, optional
         :param plot_obstructions: Flag indicating whether obstruction at the evaluation height should be plotted or not.
         :type plot_obstructions: bool, optional
+        :param flip_y_axis: Flag indicating whether y-axis should be flipped or not to have the origin at bottom left.
+        :type flip_y_axis:  bool, Default is True.
         :return: A tuple containing the matplotlib figure and axes objects that display the ASET map.
         :rtype: (matplotlib.figure.Figure, matplotlib.axes._subplots.AxesSubplot)
         """
         aset_map_array = self.get_aset_map(max_time)
         cbar_kwargs = {'label': 'Time / s'}
-        fig, ax = self._create_map_plot(map_array=aset_map_array, cmap='jet_r', plot_obstructions=plot_obstructions, **cbar_kwargs)
+        fig, ax = self._create_map_plot(map_array=aset_map_array, cmap='jet_r', plot_obstructions=plot_obstructions,
+                                        flip_y_axis=flip_y_axis, **cbar_kwargs)
         return fig, ax
 
-    def create_time_agg_wp_agg_vismap(self, plot_obstructions=False):
+    def create_time_agg_wp_agg_vismap_plot(self, plot_obstructions=False, flip_y_axis=True):
         """
         Create a plot visualizing the time-aggregated visibility map for all waypoints. The map uses a custom color
         map to distinguish whether any waypoint is visible (green) or not (red) from each cell. The plot also
@@ -484,20 +487,22 @@ class VisMap:
 
         :param plot_obstructions: Flag indicating whether obstruction at the evaluation height should be plotted or not.
         :type plot_obstructions: bool, optional
+        :param flip_y_axis: Flag indicating whether y-axis should be flipped or not to have the origin at bottom left.
+        :type flip_y_axis:  bool, Default is True.
         :return: A tuple containing the matplotlib figure and axes objects that display the aggregated visibility map.
         :rtype: (matplotlib.figure.Figure, matplotlib.axes._subplots.AxesSubplot)
         """
         cmap = matplotlib.colors.ListedColormap(['red', 'green'])
         cbar_kwargs = {'label': None, 'ticks': [0, 1], 'format': mticker.FixedFormatter(['non visible', 'visible'])}
         fig, ax = self._create_map_plot(map_array=self.time_agg_wp_agg_vismap, cmap=cmap, plot_obstructions=plot_obstructions,
-                                        **cbar_kwargs)
+                                        flip_y_axis=flip_y_axis, **cbar_kwargs)
         x_values = [wp.x for wp in self.all_wp_list]
         y_values = [wp.y for wp in self.all_wp_list]
 
         ax.plot((self.start_point[0], *x_values), (self.start_point[1], *y_values), color='darkgreen', linestyle='--')
         ax.scatter((self.start_point[0], *x_values), (self.start_point[1], *y_values), color='darkgreen')
         for wp_id, wp in enumerate(self.all_wp_list):
-            ax.annotate(f"WP : {wp_id:>}\nC : {wp.c:>}\n$\\alpha$ : {wp.alpha}$^\circ$", xy=(wp.x - 0.2, wp.y + 1.5),
+            ax.annotate(f"WP : {wp_id:>}\nC : {wp.c:>}\n$\\alpha$ : {wp.alpha}$^\\circ$", xy=(wp.x - 0.2, wp.y - 1.5),
                         bbox=dict(boxstyle="round", fc="w"), fontsize=6)
         return fig, ax
 
@@ -508,7 +513,7 @@ class VisMap:
         :param file: Path to the image file that will be used as the background.
         :type file: str
         """
-        self.background_image = plt.imread(file)
+        self.background_image = np.flip(plt.imread(file), axis=0)
 
     def compute_all(self, view_angle=True, obstructions=True, aa=True):
         """
@@ -524,12 +529,18 @@ class VisMap:
                   smooth the appearance of the visibility boundaries but might affect computational performance. Default is True.
         :type aa: bool
         """
-        self.build_obstructions_array()
         self.build_help_arrays(view_angle=view_angle, obstructions=obstructions, aa=aa)
         for time in self.vismap_time_points:
             print(f"Simulation time {time} s of {self.vismap_time_points[-1]} s")
-            wp_agg_vismap = self.get_wp_agg_vismap(time)
+            all_wp_vismap_array_list = []
+            for waypoint_id, waypoint in enumerate(self.all_wp_list):
+                print(f"Waypoint {waypoint_id}", end=" ")
+                vismap = self.get_vismap(waypoint_id, time)
+                all_wp_vismap_array_list.append(vismap)
+            self.all_time_all_wp_vismap_array_list.append(all_wp_vismap_array_list)
+            wp_agg_vismap = np.logical_or.reduce(all_wp_vismap_array_list)
             self.all_time_wp_agg_vismap_list.append(wp_agg_vismap)
+            print("")
         self.time_agg_wp_agg_vismap = np.logical_and.reduce(self.all_time_wp_agg_vismap_list)
 
     def get_local_visibility(self, time, x, y, c):
@@ -582,24 +593,83 @@ class VisMap:
 
     def get_distance_to_wp(self, x, y, waypoint_id):
         """
-         Calculate the distance from a specific cell closest to the given x, y coordinates to a designated waypoint.
+        Calculate the distance from a specific cell closest to the given x, y coordinates to a designated waypoint.
 
-         :param x: The x-coordinate of the location from which to measure distance.
-         :type x: float
-         :param y: The y-coordinate of the location from which to measure distance.
-         :type y: float
-         :param waypoint_id: The ID of the waypoint to which distance is measured.
-         :type waypoint_id: int
-         :return: The distance to the waypoint from the specified location.
-         :rtype: float
+        :param x: The x-coordinate of the location from which to measure distance.
+        :type x: float
+        :param y: The y-coordinate of the location from which to measure distance.
+        :type y: float
+        :param waypoint_id: The ID of the waypoint to which distance is measured.
+        :type waypoint_id: int
+        :return: The distance to the waypoint from the specified location.
+        :rtype: float
 
-         The distance value is useful for navigation, proximity checks, or any scenario where the physical distance
-         to a waypoint is relevant for decision-making or analysis.
-         """
-        ref_x_id = get_id_of_closest_value(self.all_x_coords, x)
-        ref_y_id = get_id_of_closest_value(self.all_y_coords, y)
-        distance_array = self.all_wp_distance_array_list[waypoint_id]
-        distance_to_wp = distance_array[ref_y_id, ref_x_id]
+        The distance value is useful for navigation, proximity checks, or any scenario where the physical distance
+        to a waypoint is relevant for decision-making or analysis.
+        """
+        wp = self.all_wp_list[waypoint_id]
+        distance_to_wp = np.linalg.norm(np.array([x - wp.x, y - wp.y]), axis=0)
         return distance_to_wp
 
+    def _add_visual_object(self, x1, x2, y1, y2, obstructions_array, status):
+        """
+        Add or remove obstructions from a specified rectangular area within the simulation grid. This is valid for
+        everything affected by the ray tracing algorithms.
 
+        :param x1: The x-coordinate of the first corner of the rectangle.
+        :type x1: float
+        :param x2: The x-coordinate of the opposite corner of the rectangle.
+        :type x2: float
+        :param y1: The y-coordinate of the first corner of the rectangle.
+        :type y1: float
+        :param y2: The y-coordinate of the opposite corner of the rectangle.
+        :type y2: float
+        :param obstructions_array: The array representing obstructions in the simulation area.
+        :type obstructions_array: np.ndarray
+        :param status: The boolean status to apply within the specified rectangle (True for obstructed, False for clear).
+        :type status: bool
+        :return: The modified obstructions array with the newly added or removed object.
+        :rtype: np.ndarray
+
+        """
+        ref_x1_id = get_id_of_closest_value(self.all_x_coords, x1 + self.cell_size[0]/2)
+        ref_x2_id = get_id_of_closest_value(self.all_x_coords, x2 - self.cell_size[0]/2) + 1
+        ref_y1_id = get_id_of_closest_value(self.all_y_coords, y1 + self.cell_size[0]/2)
+        ref_y2_id = get_id_of_closest_value(self.all_y_coords, y2 - self.cell_size[0]/2) + 1
+        obstructions_array[ref_y1_id:ref_y2_id, ref_x1_id:ref_x2_id] = status
+        return obstructions_array
+
+    def add_visual_hole(self, x1, x2, y1, y2):
+        """
+        Remove obstructions from a specified rectangular area within the simulation grid. This is valid for
+        everything affected by the ray tracing algorithms.
+
+        :param x1: The x-coordinate of the first corner of the rectangle.
+        :type x1: float
+        :param x2: The x-coordinate of the opposite corner of the rectangle.
+        :type x2: float
+        :param y1: The y-coordinate of the first corner of the rectangle.
+        :type y1: float
+        :param y2: The y-coordinate of the opposite corner of the rectangle.
+        :type y2: float
+
+        """
+        self._add_visual_object(x1, x2, y1, y2, self.obstructions_array, False)
+
+
+    def add_visual_obstruction(self, x1, x2, y1, y2):
+        """
+        Add obstructions from a specified rectangular area to the simulation grid. This is valid for
+        everything affected by the ray tracing algorithms.
+
+        :param x1: The x-coordinate of the first corner of the rectangle.
+        :type x1: float
+        :param x2: The x-coordinate of the opposite corner of the rectangle.
+        :type x2: float
+        :param y1: The y-coordinate of the first corner of the rectangle.
+        :type y1: float
+        :param y2: The y-coordinate of the opposite corner of the rectangle.
+        :type y2: float
+
+        """
+        self._add_visual_object(x1, x2, y1, y2, self.obstructions_array, True)

@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+
+[project]
+name = "fdsvismap"
+version = "0.1.0"
+description = "Tool for waypoint-based verification of visibility in the scope of performance-based fire safety assessment."
+authors = [
+    {name = "Kristian Börger", email =  "boerger@uni-wuppertal.de"},
+]
+readme = "README.md"
+license = {text = "MIT"}
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent"
+]
+dependencies = [
+    "numpy ~= 1.26.4",
+    "matplotlib ~= 3.8.4",
+    "scikit-image ~= 0.23.2",
+    "fdsreader ~= 1.10.4"
+]
+
+[project.urls]
+"Homepage" = "https://firedynamics.github.io/fdsvismap/"
+"Repository" = "https://github.com/FireDynamics/fdsvismap"
+"Bug Tracker" = "https://github.com/FireDynamics/fdsvismap/issues"

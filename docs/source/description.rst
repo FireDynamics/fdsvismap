@@ -1,0 +1,5 @@
+
+Description
+============
+
+In performance-based fire safety design, ensuring safe egress, e.g. by visibility of safety signs, is a crucial safety goal. Compliance with the building requirements is often demonstrated by simulations of smoke spread. Numerical models like the Fire Dynamics Simulator generally compute visibility as a local quantity using the light extinction coefficient, without the consideration of the actual light path to a safety sign. Visibility maps provide an approach for post-processing fire simulation data. They indicate safe areas along egress routes, with respect to visibility. At each location, the available visibility is calculated using Jin's law, as an integrated value of the extinction coefficient along the line of sight to the closest exit sign. The required visibility results from the distance between those points. Additional parameters like view angle or visual obstructions are considered. The presented method allows for temporal visibility assessment, e.g. in an ASET-RSET analysis.

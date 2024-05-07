@@ -17,18 +17,18 @@ def get_id_of_closest_value(values_array, value):
 
 def count_cells_to_obstruction(line_x, line_y, obstruction):
     """
-     Calculate the number of cells until the line intersects with an obstruction.
+    Calculate the number of cells until the line intersects with an obstruction.
 
-     :param line_x: 1D array of x-coordinates of the line.
-     :type line_x: np.ndarray
-     :param line_y: 1D array of y-coordinates of the line.
-     :type line_y: np.ndarray
-     :param obstruction: 2D array representing the obstruction.
-     Shape (n, 2) where n is the number of obstruction cells, each row containing [x, y] coordinates.
-     :type obstruction: np.ndarray
-     :return: The number of cells until the line intersects with the obstruction,
-     or -1 if there's no intersection.
-     :rtype: int
+    :param line_x: 1D array of x-coordinates of the line.
+    :type line_x: np.ndarray
+    :param line_y: 1D array of y-coordinates of the line.
+    :type line_y: np.ndarray
+    :param obstruction: 2D array representing the obstruction.
+    Shape (n, 2) where n is the number of obstruction cells, each row containing [x, y] coordinates.
+    :type obstruction: np.ndarray
+    :return: The number of cells until the line intersects with the obstruction,
+    or -1 if there's no intersection.
+    :rtype: int
     """
 
     line_x = np.array(line_x)
