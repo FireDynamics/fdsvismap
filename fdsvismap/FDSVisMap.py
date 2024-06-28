@@ -375,14 +375,14 @@ class VisMap:
         :rtype: np.ndarray
 
         """
-        non_concealed_cells_array = self.all_wp_non_concealed_cells_array_list[waypoint_id]
-        view_angle_array = self.all_wp_angle_array_list[waypoint_id]
-        vismap = self._get_visibility_array(waypoint_id, time)
+        non_concealed_cells_array = self.all_wp_non_concealed_cells_array_dict[waypoint_id]
+        view_angle_array = self.all_wp_angle_array_dict[waypoint_id]
+        visibility_array = self._get_visibility_array(waypoint_id, time)
         distance_array = self._get_dist_array(waypoint_id)
 
-        vismap_total = view_angle_array * vismap * non_concealed_cells_array
-        vismap = np.where(vismap_total >= distance_array, True, False)
-        vismap = np.where(vismap_total < self.min_vis, False, vismap)
+        visibility_array_total = view_angle_array * visibility_array * non_concealed_cells_array
+        vismap = np.where(visibility_array_total >= distance_array, True, False)
+        vismap = np.where(visibility_array_total < self.min_vis, False, vismap)
         return vismap
 
     def get_wp_agg_vismap(self, time):
