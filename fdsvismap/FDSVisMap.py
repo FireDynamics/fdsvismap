@@ -571,6 +571,30 @@ class VisMap:
             local_visibility = c / local_extco
             return min(local_visibility, self.max_vis)
 
+    def get_visibility_to_wp(self, time, x, y, waypoint_id):
+        """
+        Calculate the local visibility at a specific cell closest to the given x, y coordinates at a certain time
+        based on local extinction coefficient values.
+
+        :param time: The simulation time at which to calculate the visibility.
+        :type time: float
+        :param x: The x-coordinate in the simulation grid where visibility is to be calculated.
+        :type x: float
+        :param y: The y-coordinate in the simulation grid where visibility is to be calculated.
+        :type y: float
+        :param waypoint_id: The ID of the waypoint to check visibility for.
+        :type waypoint_id: int
+        :return: The computed local visibility value at the given location and time.
+        :rtype: float
+        """
+        ref_x_id = get_id_of_closest_value(self.all_x_coords, x)
+        ref_y_id = get_id_of_closest_value(self.all_y_coords, y)
+        visibility_array = self._get_visibility_array(waypoint_id, time)
+        non_concealed_cells_array = self.all_wp_non_concealed_cells_array_dict[waypoint_id]
+        masked_visibility_array = visibility_array * non_concealed_cells_array
+        visibility = masked_visibility_array[ref_y_id, ref_x_id]
+        return visibility
+
     def wp_is_visible(self, time, x, y, waypoint_id):
         """
         Determine if a waypoint is visible from a specific cell closest to the given x, y coordinates at a certain time.
