@@ -456,8 +456,8 @@ class VisMap:
         im = ax.imshow(map_array, cmap=cmap, alpha=0.7, extent=extent, origin=origin)
 
         fig.colorbar(mappable=im, ax=ax, orientation='horizontal', pad=0.15, **cbar_kwargs)
-        ax.set_xlabel("X / m")
-        ax.set_ylabel("Y / m")
+        ax.set_xlabel("$X$ / m")
+        ax.set_ylabel("$Y$ / m")
         return fig, ax
 
     def create_aset_map_plot(self, max_time=None, plot_obstructions=False, flip_y_axis=True):
