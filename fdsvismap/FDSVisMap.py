@@ -493,8 +493,8 @@ class VisMap:
         :return: A tuple containing the matplotlib figure and axes objects that display the aggregated visibility map.
         :rtype: (matplotlib.figure.Figure, matplotlib.axes._subplots.AxesSubplot)
         """
-        cmap = matplotlib.colors.ListedColormap(['red', 'green'])
-        cbar_kwargs = {'label': None, 'ticks': [0, 1], 'format': mticker.FixedFormatter(['non visible', 'visible'])}
+        cmap = matplotlib.colors.ListedColormap(['red', 'lime'])
+        cbar_kwargs = {'label': None, 'ticks': [0, 1], 'format': mticker.FixedFormatter(['not visible', 'visible'])}
         fig, ax = self._create_map_plot(map_array=self.time_agg_wp_agg_vismap, cmap=cmap, plot_obstructions=plot_obstructions,
                                         flip_y_axis=flip_y_axis, **cbar_kwargs)
         x_values = [wp.x for wp in self.all_wp_dict.values()]
