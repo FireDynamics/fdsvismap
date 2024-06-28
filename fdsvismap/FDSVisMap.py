@@ -243,8 +243,8 @@ class VisMap:
         distance_array = self._get_dist_array(waypoint_id)
         wp = self.all_wp_dict[waypoint_id]
         if wp.alpha is not None:
-            view_angle_array = (np.sin(np.deg2rad(wp.alpha)) * (self.xv - wp.x) + np.cos(np.deg2rad(wp.alpha)) * (
-                    self.yv - wp.y)) / distance_array
+            view_angle_array = np.clip((np.sin(np.deg2rad(wp.alpha)) * (self.xv - wp.x) + np.cos(np.deg2rad(wp.alpha))
+                                        * (self.yv - wp.y)) / distance_array, 0, 1)
         else:
             view_angle_array = np.ones_like(distance_array)
         return view_angle_array
