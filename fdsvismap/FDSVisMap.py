@@ -573,8 +573,8 @@ class VisMap:
 
     def get_visibility_to_wp(self, time, x, y, waypoint_id):
         """
-        Calculate the local visibility at a specific cell closest to the given x, y coordinates at a certain time
-        based on local extinction coefficient values.
+        Calculate the visibility at a specific cell closest to the given x, y coordinates at a certain time
+        relative to a specific waypoint.
 
         :param time: The simulation time at which to calculate the visibility.
         :type time: float
@@ -584,7 +584,7 @@ class VisMap:
         :type y: float
         :param waypoint_id: The ID of the waypoint to check visibility for.
         :type waypoint_id: int
-        :return: The computed local visibility value at the given location and time.
+        :return: The computed visibility value at the given location and time relative to a specific waypoint..
         :rtype: float
         """
         ref_x_id = get_id_of_closest_value(self.all_x_coords, x)
@@ -629,9 +629,6 @@ class VisMap:
         :type waypoint_id: int
         :return: The distance to the waypoint from the specified location.
         :rtype: float
-
-        The distance value is useful for navigation, proximity checks, or any scenario where the physical distance
-        to a waypoint is relevant for decision-making or analysis.
         """
         wp = self.all_wp_dict[waypoint_id]
         distance_to_wp = np.linalg.norm(np.array([x - wp.x, y - wp.y]), axis=0)
@@ -656,7 +653,6 @@ class VisMap:
         :type status: bool
         :return: The modified obstructions array with the newly added or removed object.
         :rtype: np.ndarray
-
         """
         ref_x1_id = get_id_of_closest_value(self.all_x_coords, x1 + self.cell_size[0]/2)
         ref_x2_id = get_id_of_closest_value(self.all_x_coords, x2 - self.cell_size[0]/2) + 1
@@ -678,7 +674,6 @@ class VisMap:
         :type y1: float
         :param y2: The y-coordinate of the opposite corner of the rectangle.
         :type y2: float
-
         """
         self._add_visual_object(x1, x2, y1, y2, self.obstructions_array, False)
 
@@ -696,6 +691,5 @@ class VisMap:
         :type y1: float
         :param y2: The y-coordinate of the opposite corner of the rectangle.
         :type y2: float
-
         """
         self._add_visual_object(x1, x2, y1, y2, self.obstructions_array, True)
