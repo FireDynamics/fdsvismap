@@ -2,7 +2,7 @@
 Tool for waypoint-based verification of visibility in the scope of performance-based fire safety assessment 
 
 # Installation
-Still to come ...
+pip install fdsvismap
 
 # Usage Example
 
@@ -31,9 +31,9 @@ vis.add_background_image(bg_img)
 
 # Set starpoint and waypoints along escape route.
 vis.set_start_point(1, 9)
-vis.set_waypoint(8.4, 4.8, 3, 0)
-vis.set_waypoint(9.8, 4, 3, 270)
-vis.set_waypoint(17, 10, 3, 180)
+vis.set_waypoint(1, 8.4, 4.8, 3, 0)
+vis.set_waypoint(2, 9.8, 4, 3, 270)
+vis.set_waypoint(3, 17, 10, 3, 180)
 
 # Set times when the simulation should be evaluated.
 times = range(0, 500, 50)
@@ -63,20 +63,25 @@ plt.close()
 time = 500
 x = 2
 y = 4
-waypoint_id = 1
+c = 3
+waypoint_id = 2
 
 print("\n")
 
 # Check if waypoint is visible from given location at given time.
-wp_is_visible = vis.wp_is_visible(500, 2, 4, 1)
+wp_is_visible = vis.wp_is_visible(time, x, y, waypoint_id)
 print(f"Is waypoint {waypoint_id} visible at {time} s at coordinates X/Y = ({x},{y})?: {wp_is_visible}")
 
 # Get distance from waypoint to given location.
-distance_top_wp = vis.get_distance_to_wp(17, 5, 2)
+distance_top_wp = vis.get_distance_to_wp(x, y, waypoint_id)
 print(f"The distance from waypoint {waypoint_id} to location X/Y = ({x},{y}) is {distance_top_wp} m.")
 
 # Calculate local visibility at given location and time, considering a specific c factor.
-local_visibility = vis.get_local_visibility(400, 2, 4, 3)
-print(f"The local visibility at location X/Y = ({x},{y}) is {local_visibility:.2f} m.")
+local_visibility = vis.get_local_visibility(time, x, y, c)
+print(f"The local visibility at time {time} s and location X/Y = ({x},{y}) is {local_visibility:.2f} m.")
+
+# Calculate visibility at given location and time relative to a waypoint, considering a specific c factor.
+visibility = vis.get_visibility_to_wp(time, x, y, waypoint_id)
+print(f"The visibility at time {time} s and location X/Y = ({x},{y}) relative to waypoint {waypoint_id} is {visibility:.2f} m.")
 
 ```
