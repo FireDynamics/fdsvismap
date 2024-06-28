@@ -33,18 +33,18 @@ class VisMap:
     :vartype slc: fds.Simulation.Slice or None
     :ivar start_point: The starting point coordinates (x, y) for the route of egress. Initialized as None.
     :vartype start_point: tuple[float, float] or None
-    :ivar all_wp_list: List of waypoints for the path. Initialized as an empty list.
-    :vartype all_wp_list: list[Waypoint]
-    :ivar all_wp_distance_array_list: List of distance arrays between each waypoint and all cells. Initialized as an empty list.
-    :vartype all_wp_distance_array_list: list[np.ndarray]
-    :ivar all_wp_non_concealed_cells_array_list: List of arrays indicating non-concealed cells for each waypoint. Initialized as an empty list.
-    :vartype all_wp_non_concealed_cells_array_list: list[np.ndarray]
-    :ivar all_wp_angle_array_list: List of arrays representing the cosine of the angle of view for each waypoint. Initialized as an empty list.
-    :vartype all_wp_angle_array_list: list[np.ndarray]
+    :ivar all_wp_dict: Dictionary of waypoints for the path. Initialized as an empty list.
+    :vartype all_wp_dict: dict[Waypoint]
+    :ivar all_wp_distance_array_dict: Dictionary of distance arrays between each waypoint and all cells. Initialized as an empty list.
+    :vartype all_wp_distance_array_list: dicts[np.ndarray]
+    :ivar all_wp_non_concealed_cells_array_dict: Dictionary of arrays indicating non-concealed cells for each waypoint. Initialized as an empty list.
+    :vartype all_wp_non_concealed_cells_array_dict: dict[np.ndarray]
+    :ivar all_wp_angle_array_dict: Dictionary of arrays representing the cosine of the angle of view for each waypoint. Initialized as an empty list.
+    :vartype all_wp_angle_array_dict: dict[np.ndarray]
     :ivar all_time_all_wp_vismap_array_list: List of visibility maps for all waypoints at all times. Initialized as an empty list.
     :vartype all_time_all_wp_vismap_array_list: list[list[np.ndarray]]
-    :ivar all_wp_non_concealed_cells_xy_idx_list: List of indices of non-concealed cells for each waypoint. Initialized as an empty list.
-    :vartype all_wp_non_concealed_cells_xy_idx_list: list[tuple[np.ndarray, np.ndarray]]
+    :ivar all_wp_non_concealed_cells_xy_idx_dict: Dictionary of indices of non-concealed cells for each waypoint. Initialized as an empty list.
+    :vartype all_wp_non_concealed_cells_xy_idx_dict: dict[tuple[np.ndarray, np.ndarray]]
     :ivar min_vis: Minimum local visibility threshold to meet performance criteria. Initialized to 0.
     :vartype min_vis: float
     :ivar max_vis: Maximum visibility threshold. Initialized to 30.
@@ -76,12 +76,12 @@ class VisMap:
         self.quantity = 'ext_coef_C0.9H0.1'
         self.slc = None
         self.start_point = None
-        self.all_wp_list = []
-        self.all_wp_distance_array_list = []
-        self.all_wp_non_concealed_cells_array_list = []
-        self.all_wp_angle_array_list = []
+        self.all_wp_dict = {}
+        self.all_wp_distance_array_dict = {}
+        self.all_wp_non_concealed_cells_array_dict = {}
+        self.all_wp_angle_array_dict = {}
         self.all_time_all_wp_vismap_array_list = []
-        self.all_wp_non_concealed_cells_xy_idx_list = []
+        self.all_wp_non_concealed_cells_xy_idx_dict = {}
         self.min_vis = 0
         self.max_vis = 30
         self.fds_slc_height = None
@@ -124,20 +124,21 @@ class VisMap:
         """
         self.start_point = (x, y)
 
-    def set_waypoint(self, x, y, c=3, alpha=None):
+    def set_waypoint(self, waypoint_id, x, y, c=3, alpha=None):
         """
         Add a waypoint along the route of egress.
-
+        :param waypoint_id: ID of the waypoint to add to the route.
+        :type waypoint_id: int
         :param x: x-coordinate of the waypoint referring to global FDS coordinates.
         :type x: float
         :param y: y-coordinate of the waypoint referring to global FDS coordinates.
         :type y: float
         :param c: Contrast factor for exit sign according to Jin.
         :type c: int, optional
-        :param alpha: Orientation angle of the exit sign according to global FDS coordinates. # TODO: specify where is 0 deg
+        :param alpha: Orientation angle of the exit sign according to global FDS coordinates.
         :type alpha: int or None, optional
         """
-        self.all_wp_list.append(Waypoint(x, y, c, alpha))
+        self.all_wp_dict[waypoint_id] = Waypoint(x, y, c, alpha)
 
     def read_fds_data(self, sim_dir, slice_id=0, fds_slc_height=2):  #: Todo: specify slice closest to given height
         """
@@ -184,8 +185,8 @@ class VisMap:
         :return: Tuple of arrays (x_indices, y_indices) representing the X and Y indices of non-concealed cells.
         :rtype: tuple[np.ndarray, np.ndarray]
         """
-        x_idx = self.all_wp_non_concealed_cells_xy_idx_list[waypoint_id][1]
-        y_idx = self.all_wp_non_concealed_cells_xy_idx_list[waypoint_id][0]
+        x_idx = self.all_wp_non_concealed_cells_xy_idx_dict[waypoint_id][1]
+        y_idx = self.all_wp_non_concealed_cells_xy_idx_dict[waypoint_id][0]
         return x_idx, y_idx
 
     def _get_mean_extco_array_at_time(self, waypoint_id, time):
@@ -199,7 +200,7 @@ class VisMap:
         :return: A 2D numpy array with the mean extinction coefficients at the specified time, transposed for correct orientation.
         :rtype: np.ndarray
         """
-        wp = self.all_wp_list[waypoint_id]
+        wp = self.all_wp_dict[waypoint_id]
         extco_array = self._get_extco_array_at_time(time)
         ref_x_id = get_id_of_closest_value(self.all_x_coords, wp.x)
         ref_y_id = get_id_of_closest_value(self.all_y_coords, wp.y)
@@ -225,7 +226,7 @@ class VisMap:
         :return: A 2D numpy array where each element represents the distance from the specified waypoint to that cell.
         :rtype: np.ndarray
         """
-        wp = self.all_wp_list[waypoint_id]
+        wp = self.all_wp_dict[waypoint_id]
         self.xv, self.yv = np.meshgrid(self.all_x_coords, self.all_y_coords)
         distance_array = np.linalg.norm(np.array([self.xv - wp.x, self.yv - wp.y]), axis=0)
         return distance_array
@@ -240,7 +241,7 @@ class VisMap:
         :rtype: np.ndarray
         """
         distance_array = self._get_dist_array(waypoint_id)
-        wp = self.all_wp_list[waypoint_id]
+        wp = self.all_wp_dict[waypoint_id]
         if wp.alpha is not None:
             view_angle_array = (np.sin(np.deg2rad(wp.alpha)) * (self.xv - wp.x) + np.cos(np.deg2rad(wp.alpha)) * (
                     self.yv - wp.y)) / distance_array
@@ -279,19 +280,19 @@ class VisMap:
         :param aa: Flag indicating whether antialiasing should be used in the calculation of line-of-sight paths, affecting the smoothness of boundaries.
         :type aa: bool, optional
         """
-        for waypoint_id, _ in enumerate(self.all_wp_list):
+        for waypoint_id in self.all_wp_dict.keys():
             if obstructions:
                 non_concealed_cells_array = self._get_non_concealed_cells_array(waypoint_id, aa)
-                self.all_wp_non_concealed_cells_array_list.append(non_concealed_cells_array)
-                self.all_wp_non_concealed_cells_xy_idx_list.append(np.where(non_concealed_cells_array == True))
+                self.all_wp_non_concealed_cells_array_dict[waypoint_id] = non_concealed_cells_array
+                self.all_wp_non_concealed_cells_xy_idx_dict[waypoint_id] = np.where(non_concealed_cells_array == True)
             else:
-                self.all_wp_non_concealed_cells_array_list.append(1)
+                self.all_wp_non_concealed_cells_array_dict[waypoint_id] = 1
             if view_angle:
-                self.all_wp_angle_array_list.append(self._get_view_angle_array(waypoint_id))
+                self.all_wp_angle_array_dict[waypoint_id] = self._get_view_angle_array(waypoint_id)
             else:
-                self.all_wp_angle_array_list.append(1)
+                self.all_wp_angle_array_dict[waypoint_id] = 1
 
-            self.all_wp_distance_array_list.append(self._get_dist_array(waypoint_id))
+            self.all_wp_distance_array_dict[waypoint_id] = self._get_dist_array(waypoint_id)
 
     def _get_non_concealed_cells_array(self, waypoint_id, aa=True):
         """
@@ -306,7 +307,7 @@ class VisMap:
         :rtype: np.ndarray
         """
         # Retrieve the coordinates for the target waypoint
-        wp = self.all_wp_list[waypoint_id]
+        wp = self.all_wp_dict[waypoint_id]
 
         # Find the closest grid coordinates to the target waypoint
         closest_y_id = get_id_of_closest_value(self.all_x_coords, wp.x)  # TODO: fix x / y coordinates switch
@@ -355,7 +356,7 @@ class VisMap:
         :return: A 2D numpy array representing the visibility (m) from the waypoint along the line of sight relative to each cell.
         :rtype: np.ndarray
         """
-        wp = self.all_wp_list[waypoint_id]
+        wp = self.all_wp_dict[waypoint_id]
         mean_extco_array = self._get_mean_extco_array_at_time(waypoint_id, time)
         vis_array = np.divide(wp.c, mean_extco_array, out=np.full_like(mean_extco_array, self.max_vis),
                               where=mean_extco_array != 0)
@@ -496,14 +497,15 @@ class VisMap:
         cbar_kwargs = {'label': None, 'ticks': [0, 1], 'format': mticker.FixedFormatter(['non visible', 'visible'])}
         fig, ax = self._create_map_plot(map_array=self.time_agg_wp_agg_vismap, cmap=cmap, plot_obstructions=plot_obstructions,
                                         flip_y_axis=flip_y_axis, **cbar_kwargs)
-        x_values = [wp.x for wp in self.all_wp_list]
-        y_values = [wp.y for wp in self.all_wp_list]
+        x_values = [wp.x for wp in self.all_wp_dict.values()]
+        y_values = [wp.y for wp in self.all_wp_dict.values()]
 
         ax.plot((self.start_point[0], *x_values), (self.start_point[1], *y_values), color='darkgreen', linestyle='--')
         ax.scatter((self.start_point[0], *x_values), (self.start_point[1], *y_values), color='darkgreen')
-        for wp_id, wp in enumerate(self.all_wp_list):
-            ax.annotate(f"WP : {wp_id:>}\nC : {wp.c:>}\n$\\alpha$ : {wp.alpha}$^\\circ$", xy=(wp.x - 0.2, wp.y - 1.5),
-                        bbox=dict(boxstyle="round", fc="w"), fontsize=6)
+        for wp_id, wp in self.all_wp_dict.items():
+            ax.annotate(f"$W_{{{wp_id}}}$\nC : {wp.c:>}\n$\\alpha$ : {wp.alpha}$^\\circ$", xy=(wp.x - 1 , wp.y - 2),
+                            bbox=dict(boxstyle="round", fc="w"), fontsize=6)
+
         return fig, ax
 
     def add_background_image(self, file):
@@ -533,7 +535,7 @@ class VisMap:
         for time in self.vismap_time_points:
             print(f"Simulation time {time} s of {self.vismap_time_points[-1]} s")
             all_wp_vismap_array_list = []
-            for waypoint_id, waypoint in enumerate(self.all_wp_list):
+            for waypoint_id in self.all_wp_dict.keys():
                 print(f"Waypoint {waypoint_id}", end=" ")
                 vismap = self.get_vismap(waypoint_id, time)
                 all_wp_vismap_array_list.append(vismap)
@@ -607,7 +609,7 @@ class VisMap:
         The distance value is useful for navigation, proximity checks, or any scenario where the physical distance
         to a waypoint is relevant for decision-making or analysis.
         """
-        wp = self.all_wp_list[waypoint_id]
+        wp = self.all_wp_dict[waypoint_id]
         distance_to_wp = np.linalg.norm(np.array([x - wp.x, y - wp.y]), axis=0)
         return distance_to_wp
 
