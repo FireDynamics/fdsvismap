@@ -1,5 +1,5 @@
 # FDSVisMap
-Tool for waypoint-based verification of visibility in the scope of performance-based fire safety assessment 
+Tool for waypoint-based assessment of visibility in the scope of performance-based fire safety design. 
 
 # Installation
 pip install fdsvismap
