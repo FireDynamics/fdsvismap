@@ -140,19 +140,29 @@ class VisMap:
         """
         self.all_wp_dict[waypoint_id] = Waypoint(x, y, c, alpha)
 
-    def read_fds_data(self, sim_dir, slice_id=0, fds_slc_height=2):  #: Todo: specify slice closest to given height
+    def read_fds_data(self, sim_dir, fds_slc_height=2, fds_slc_id=None):
         """
         Read FDS data and store relevant coordinates, shape of the meshgrid, slices and obstructions.
+        If defined, the relevant slice file is read by ID, otherwise by quantity and closest to given height.
 
         :param sim_dir: Directory where FDS simulation data is stored
         :type sim_dir: object
-        :param slice_id: Index of FDS slice file to be evaluated. Default is 0.
-        :type slice_id: int
+        :param fds_slc_id: ID (name) of FDS slice file to be evaluated. Default is None.
+        :type fds_slc_id: str
         :param fds_slc_height: The height at which to evaluate visibility. Default is 2.
         :type fds_slc_height: float, optional
         """
         sim = fds.Simulation(sim_dir)
-        self.slc = sim.slices.filter_by_quantity(self.quantity)[slice_id]
+        if fds_slc_id:
+            self.slc = sim.slices.get_by_id(fds_slc_id)
+            print(f"Note: Slice with ID {fds_slc_id} was selected. Quantity is treated as SOOT EXTINCTION COEFFICIENT.")
+        else:
+            if self.quantity in ['ext_coef_C0.9H0.1', 'SOOT EXTINCTION COEFFICIENT', 'EXTINCTION COEFFICIENT']:
+                self.slc = sim.slices.filter_by_quantity('SOOT EXTINCTION COEFFICIENT').get_nearest(0, 0, fds_slc_height)
+            elif self.quantity in ['SOOT OPTICAL DENSITY']:
+                self.slc = sim.slices.filter_by_quantity('SOOT OPTICAL DENSITY').get_nearest(0, 0, fds_slc_height)
+            else:
+                raise ValueError(f"Unsupported quantity: {self.quantity}")
         self.extent = np.array(self.slc.extent._extents)
         self.all_x_coords = self.slc.get_coordinates()['x']
         self.all_y_coords = self.slc.get_coordinates()['y']
@@ -173,7 +183,10 @@ class VisMap:
         :rtype: np.ndarray
         """
         time_index = self.slc.get_nearest_timestep(time)
-        extco_array = self.slc.to_global()[time_index]
+        if self.quantity == 'OPTICAL DENSITY':
+            extco_array = self.slc.to_global()[time_index] * 2.3
+        else:
+            extco_array = self.slc.to_global()[time_index]
         return extco_array
 
     def _get_non_concealed_cells_idx(self, waypoint_id):

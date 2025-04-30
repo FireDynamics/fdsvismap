@@ -12,10 +12,9 @@ sim_dir = str(project_root / "fds_data")
 
 # Create instance of VisMap class
 vis = VisMap()
-vis.quantity = 'SOOT EXTINCTION COEFFICIENT'
 
 # Read data from FDS simulation directory.
-vis.read_fds_data(sim_dir)
+vis.read_fds_data(sim_dir, fds_slc_height=2)
 
 # Add background image.
 vis.add_background_image(bg_img)
