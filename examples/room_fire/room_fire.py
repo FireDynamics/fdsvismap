@@ -3,12 +3,14 @@
 from fdsvismap import VisMap
 from pathlib import Path
 import matplotlib.pyplot as plt
+import time
 
 project_root = Path(__file__).parent
 bg_img = project_root / "misc" / "floorplan.png"
 
 # Set path for FDS simulation directory and background image.
 sim_dir = str(project_root / "fds_data")
+sim_dir = '/Users/kristian/Documents/PhD/Beiträge und Veröffentlichungen/2023_fdsvismap/examples/room_fire/old/fds_simulations/model_0.05m'
 
 # Create instance of VisMap class
 vis = VisMap()
@@ -33,7 +35,13 @@ vis.set_time_points(times)
 vis.add_visual_obstruction(8, 8.8, 4.6, 4.8)
 
 # Do the required calculations to create the Vismap.
+print("\nStarting computation...")
+start_time = time.time()
 vis.compute_all()
+
+end_time = time.time()
+elapsed_time = end_time - start_time
+print(f"Computation completed in {elapsed_time:.2f} seconds.")
 
 # # Plot ASET map based on Vismaps and save as pdf.
 fig, ax = vis.create_aset_map_plot(plot_obstructions=True)

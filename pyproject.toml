@@ -3,7 +3,7 @@ requires = ["setuptools", "wheel"]
 
 [project]
 name = "fdsvismap"
-version = "0.1.2"
+version = "0.1.3"
 description = "Tool for waypoint-based verification of visibility in the scope of performance-based fire safety assessment."
 authors = [
     {name = "Kristian Börger", email =  "boerger@uni-wuppertal.de"},
