@@ -159,7 +159,7 @@ class VisMap:
         else:
             if self.quantity in ['ext_coef_C0.9H0.1', 'SOOT EXTINCTION COEFFICIENT', 'EXTINCTION COEFFICIENT']:
                 self.slc = sim.slices.filter_by_quantity('SOOT EXTINCTION COEFFICIENT').get_nearest(0, 0, fds_slc_height)
-            elif self.quantity in ['SOOT OPTICAL DENSITY']:
+            elif self.quantity in ['SOOT OPTICAL DENSITY', 'OPTICAL DENSITY']:
                 self.slc = sim.slices.filter_by_quantity('SOOT OPTICAL DENSITY').get_nearest(0, 0, fds_slc_height)
             else:
                 raise ValueError(f"Unsupported quantity: {self.quantity}")
