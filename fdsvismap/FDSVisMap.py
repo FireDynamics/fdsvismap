@@ -183,8 +183,8 @@ class VisMap:
         :rtype: np.ndarray
         """
         time_index = self.slc.get_nearest_timestep(time)
-        if self.quantity == 'OPTICAL DENSITY':
-            extco_array = self.slc.to_global()[time_index] * 2.3
+        if self.quantity == 'SOOT OPTICAL DENSITY':
+            extco_array = self.slc.to_global()[time_index] * np.log(10)
         else:
             extco_array = self.slc.to_global()[time_index]
         return extco_array
