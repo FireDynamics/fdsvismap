@@ -157,9 +157,9 @@ class VisMap:
             self.slc = sim.slices.get_by_id(fds_slc_id)
             print(f"Note: Slice with ID {fds_slc_id} was selected. Quantity is treated as SOOT EXTINCTION COEFFICIENT.")
         else:
-            if self.quantity in ['ext_coef_C0.9H0.1', 'SOOT EXTINCTION COEFFICIENT', 'EXTINCTION COEFFICIENT']:
+            if self.quantity in ['ext_coef_C', 'ext_coef_C0.9H0.1', 'SOOT EXTINCTION COEFFICIENT', 'EXTINCTION COEFFICIENT']:
                 self.slc = sim.slices.filter_by_quantity('SOOT EXTINCTION COEFFICIENT').get_nearest(0, 0, fds_slc_height)
-            elif self.quantity in ['SOOT OPTICAL DENSITY', 'OPTICAL DENSITY']:
+            elif self.quantity in ['OD_C', 'OD_C0.9H0.1', 'SOOT OPTICAL DENSITY', 'OPTICAL DENSITY']:
                 self.slc = sim.slices.filter_by_quantity('SOOT OPTICAL DENSITY').get_nearest(0, 0, fds_slc_height)
             else:
                 raise ValueError(f"Unsupported quantity: {self.quantity}")
@@ -183,7 +183,7 @@ class VisMap:
         :rtype: np.ndarray
         """
         time_index = self.slc.get_nearest_timestep(time)
-        if self.quantity == 'SOOT OPTICAL DENSITY':
+        if self.quantity in ['OD_C', 'OD_C0.9H0.1', 'SOOT OPTICAL DENSITY', 'OPTICAL DENSITY']:
             extco_array = self.slc.to_global()[time_index] * np.log(10)
         else:
             extco_array = self.slc.to_global()[time_index]
