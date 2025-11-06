@@ -390,7 +390,9 @@ class VisMap:
             ]
 
             buffer_array[line_x_idx, line_y_idx] = True
-            obstructed_cells = np.where(self.obstructions_array & buffer_array)
+            obstructed_cells = np.where(
+                (self.obstructions_array == True) & (buffer_array == True)  # noqa: E712
+            )
 
             # If line intersects obstructions, mark only the segment before the first obstruction as visible
             if obstructed_cells[0].size != 0:
