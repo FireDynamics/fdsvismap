@@ -81,14 +81,14 @@ class TestVisMapBasics:
 
         vis = VisMap()
         print(f"{sim_dir = }")
-        print(f"sim_dir exists: {sim_dir.exists()}")
+        print(f"sim_dir exists: {Path(sim_dir).exists()}")
         print("Contents of sim_dir:")
-        if sim_dir.exists():
-            for item in sorted(sim_dir.iterdir()):
+        if Path(sim_dir).exists():
+            for item in sorted(Path(sim_dir).iterdir()):
                 print(f"  {item.name}")
 
             # Look for .svm file
-            svm_files = list(sim_dir.glob("*.svm"))
+            svm_files = list(Path(sim_dir).glob("*.svm"))
             print(f"SVM files found: {len(svm_files)}")
             if svm_files:
                 svm_file = svm_files[0]
