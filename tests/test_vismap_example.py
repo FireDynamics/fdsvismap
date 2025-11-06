@@ -88,7 +88,7 @@ class TestVisMapBasics:
                 print(f"  {item.name}")
 
             # Look for .svm file
-            svm_files = list(Path(sim_dir).glob("*.svm"))
+            svm_files = list(Path(sim_dir).glob("*.smv"))
             print(f"SVM files found: {len(svm_files)}")
             if svm_files:
                 svm_file = svm_files[0]
