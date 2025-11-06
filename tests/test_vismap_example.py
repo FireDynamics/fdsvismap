@@ -80,6 +80,7 @@ class TestVisMapBasics:
             pytest.skip("FDS data directory not found")
 
         vis = VisMap()
+        print(f"{sim_dir = }")
         vis.read_fds_data(str(sim_dir), fds_slc_height=2)
         assert vis is not None
 
