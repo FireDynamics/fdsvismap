@@ -1,10 +1,52 @@
 # FDSVisMap
-Tool for waypoint-based assessment of visibility in the scope of performance-based fire safety design. 
 
-# Installation
+[![PyPI version](https://img.shields.io/pypi/v/fdsvismap.svg)](https://pypi.org/project/fdsvismap/)
+[![Code Quality](https://github.com/FireDynamics/fdsvismap/actions/workflows/code_quality.yml/badge.svg)](https://github.com/FireDynamics/fdsvismap/actions/workflows/code_quality.yml)
+[![License](https://img.shields.io/github/license/FireDynamics/fdsvismap.svg)](https://github.com/FireDynamics/fdsvismap/blob/main/LICENSE)
+[![Python Versions](https://img.shields.io/pypi/pyversions/fdsvismap.svg)](https://pypi.org/project/fdsvismap/)
+
+---
+
+**FDSVisMap** is a Python tool for **waypoint-based assessment of visibility** in the context of **performance-based fire safety design**.  
+It provides methods for analyzing and visualizing **visibility maps (Vismaps)** derived from FDS (Fire Dynamics Simulator) output data.
+
+---
+
+## Installation
+
+
+```bash
 pip install fdsvismap
+```
 
-# Usage Example
+## Developement
+
+To run code quality checks with Ruff, you can use the following command locally:
+
+```bash
+ruff check .
+ruff format --check .
+```
+
+## Citation 
+
+To cite this work refer to 
+
+```
+@article{BORGER2024104269,
+title = {A waypoint based approach to visibility in performance based fire safety design},
+author = {Kristian Börger and Alexander Belt and Lukas Arnold},
+journal = {Fire Safety Journal},
+volume = {150},
+pages = {104269},
+year = {2024},
+issn = {0379-7112},
+doi = {https://doi.org/10.1016/j.firesaf.2024.104269},
+url = {https://www.sciencedirect.com/science/article/pii/S0379711224001826},
+}
+```
+
+## Usage Example
 
 ```python
 """Example script to create visibility maps."""
