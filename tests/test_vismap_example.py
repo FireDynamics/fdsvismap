@@ -81,6 +81,27 @@ class TestVisMapBasics:
 
         vis = VisMap()
         print(f"{sim_dir = }")
+        print(f"sim_dir exists: {sim_dir.exists()}")
+        print("Contents of sim_dir:")
+        if sim_dir.exists():
+            for item in sorted(sim_dir.iterdir()):
+                print(f"  {item.name}")
+
+            # Look for .svm file
+            svm_files = list(sim_dir.glob("*.svm"))
+            print(f"SVM files found: {len(svm_files)}")
+            if svm_files:
+                svm_file = svm_files[0]
+                print(f"Reading first 10 lines of {svm_file.name}:")
+                with open(svm_file, "r") as f:
+                    for i, line in enumerate(f):
+                        if i < 10:
+                            print(f"  {line.rstrip()}")
+                        else:
+                            break
+        else:
+            print(f"  Directory does not exist!")
+
         vis.read_fds_data(str(sim_dir), fds_slc_height=2)
         assert vis is not None
 
