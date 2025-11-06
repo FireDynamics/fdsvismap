@@ -1,3 +1,5 @@
+"""Module for creating visibility maps (VisMap) based on Fire Dynamics Simulator (FDS) data."""
+
 import fdsreader as fds
 import matplotlib.colors
 import matplotlib.pyplot as plt
@@ -65,10 +67,7 @@ class VisMap:
     """
 
     def __init__(self):
-        """
-        Initialize the VisMap object.
-
-        """
+        """Initialize the VisMap object."""
         self.obstructions_array = None
         self.fds_grid_shape = None
         self.all_y_coords = None
@@ -591,7 +590,9 @@ class VisMap:
         self, plot_obstructions=False, flip_y_axis=True
     ):
         """
-        Create a plot visualizing the time-aggregated visibility map for all waypoints. The map uses a custom color
+        Create a plot visualizing the time-aggregated visibility map for all waypoints.
+
+        The map uses a custom color
         map to distinguish whether any waypoint is visible (green) or not (red) from each cell. The plot also
         features the trajectory of movement from the start point through all waypoints, highlighted with annotations
         for each waypoint.
@@ -681,8 +682,9 @@ class VisMap:
 
     def get_local_visibility(self, time, x, y, c):
         """
-        Calculate the local visibility at a specific cell closest to the given x, y coordinates at a certain time
-        based on local extinction coefficient values.
+        Calculate the local visibility at a specific cell closest to the given x, y.
+
+        coordinates at a certain time based on local extinction coefficient values.
 
         :param time: The simulation time at which to calculate the visibility.
         :type time: float
@@ -709,8 +711,9 @@ class VisMap:
 
     def get_visibility_to_wp(self, time, x, y, waypoint_id):
         """
-        Calculate the visibility at a specific cell closest to the given x, y coordinates at a certain time
-        relative to a specific waypoint.
+        Calculate the visibility at a specific cell closest to the given x, y.
+
+        coordinates at a certain time relative to a specific waypoint.
 
         :param time: The simulation time at which to calculate the visibility.
         :type time: float
@@ -809,8 +812,9 @@ class VisMap:
 
     def add_visual_hole(self, x1, x2, y1, y2):
         """
-        Remove obstructions from a specified rectangular area within the simulation grid. This is valid for
-        everything affected by the ray tracing algorithms.
+        Remove obstructions from a specified rectangular area within the simulation grid.
+
+        This is valid for everything affected by the ray tracing algorithms.
 
         :param x1: The x-coordinate of the first corner of the rectangle.
         :type x1: float
@@ -825,8 +829,9 @@ class VisMap:
 
     def add_visual_obstruction(self, x1, x2, y1, y2):
         """
-        Add obstructions from a specified rectangular area to the simulation grid. This is valid for
-        everything affected by the ray tracing algorithms.
+        Add obstructions from a specified rectangular area to the simulation grid.
+
+        This is valid for everything affected by the ray tracing algorithms.
 
         :param x1: The x-coordinate of the first corner of the rectangle.
         :type x1: float
