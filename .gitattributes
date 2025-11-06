@@ -1,0 +1,7 @@
+**/fds_data/*.s3d filter=lfs diff=lfs merge=lfs -text
+**/fds_data/*.s3d.sz filter=lfs diff=lfs merge=lfs -text
+**/fds_data/*.sf filter=lfs diff=lfs merge=lfs -text
+**/fds_data/*.sf.bnd filter=lfs diff=lfs merge=lfs -text
+**/fds_data/*.smv filter=lfs diff=lfs merge=lfs -text
+**/fds_data/*.pickle filter=lfs diff=lfs merge=lfs -text
+**/fds_data/*.csv filter=lfs diff=lfs merge=lfs -text
