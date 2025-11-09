@@ -1,7 +1,8 @@
 import numpy as np
+from numpy.typing import NDArray
 
 
-def get_id_of_closest_value(values_array, value):
+def get_id_of_closest_value(values_array: NDArray[np.floating], value: float) -> float:
     """
     Find the closest point in a given coordinate array to a given value.
 
@@ -15,7 +16,11 @@ def get_id_of_closest_value(values_array, value):
     return (np.abs(values_array - value)).argmin()
 
 
-def count_cells_to_obstruction(line_x, line_y, obstruction):
+def count_cells_to_obstruction(
+    line_x: NDArray[np.floating],
+    line_y: NDArray[np.floating],
+    obstruction: NDArray[np.floating],
+) -> int:
     """
     Calculate the number of cells until the line intersects with an obstruction.
 
@@ -30,7 +35,6 @@ def count_cells_to_obstruction(line_x, line_y, obstruction):
     or -1 if there's no intersection.
     :rtype: int
     """
-
     line_x = np.array(line_x)
     line_y = np.array(line_y)
     obstruction = np.array(obstruction).T
