@@ -26,19 +26,3 @@ repos:
             "matplotlib~=3.9"
         ]
         exclude: "(^examples/|^docs/|^scripts/|^tests/)"
-
-  - repo: https://github.com/kynan/nbstripout
-    rev: 0.8.1
-    hooks:
-      - id: nbstripout
-        exclude: "(^docs/|^examples)"
-
-  -   repo: https://github.com/pre-commit/pre-commit-hooks
-      rev: v6.0.0
-      hooks:
-        - id: end-of-file-fixer
-        - id: trailing-whitespace
-        - id: check-yaml
-        - id: check-json
-        - id: check-symlinks
-        - id: destroyed-symlinks
