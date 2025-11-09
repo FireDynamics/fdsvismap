@@ -17,6 +17,7 @@ class Waypoint:
     :param alpha: Orientation angle of the exit sign in the global coordinate system.
     :type alpha: float
     """
+
     x: float
     y: float
     c: float
