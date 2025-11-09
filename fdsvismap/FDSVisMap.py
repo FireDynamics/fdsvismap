@@ -7,11 +7,11 @@ import matplotlib.ticker as mticker
 import numpy as np
 from skimage.draw import line, line_aa
 
-from fdsvismap.Waypoint import Waypoint
 from fdsvismap.helper_functions import (
-    get_id_of_closest_value,
     count_cells_to_obstruction,
+    get_id_of_closest_value,
 )
+from fdsvismap.Waypoint import Waypoint
 
 
 class VisMap:
