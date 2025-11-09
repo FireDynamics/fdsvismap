@@ -19,10 +19,14 @@ repos:
     hooks:
       - id: mypy
         name: Check type hints (mypy)
+        args:
+          - --disallow-untyped-defs
+          - --warn-unused-ignores
+          - --no-warn-return-any
         additional_dependencies: [
             "numpy~=2.1",
             "pandas~=2.2.3",
             "scipy~=1.14",
             "matplotlib~=3.9"
         ]
-        exclude: "(^examples/|^docs/|^scripts/|^tests/)"
+        exclude: "(^docs/|^scripts/|^tests/)"
