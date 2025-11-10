@@ -1,9 +1,11 @@
 """Example script to create visibility maps."""
 
-from fdsvismap import VisMap
-from pathlib import Path
-import matplotlib.pyplot as plt
 import time
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+
+from fdsvismap import VisMap
 
 project_root = Path(__file__).parent
 bg_img = project_root / "misc" / "floorplan.png"

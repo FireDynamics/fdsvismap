@@ -1,14 +1,14 @@
 """Basic tests for fdsvismap example script."""
 
-import pytest
-from pathlib import Path
-import matplotlib
-import numpy as np
-
-import matplotlib.pyplot as plt
-from fdsvismap import VisMap
-
 import warnings
+from pathlib import Path
+
+import matplotlib
+import matplotlib.pyplot as plt
+import numpy as np
+import pytest
+
+from fdsvismap import VisMap
 
 matplotlib.use("Agg")
 
