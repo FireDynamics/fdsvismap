@@ -12,6 +12,15 @@ from fdsvismap.helper_functions import (
     get_id_of_closest_value,
 )
 from fdsvismap.Waypoint import Waypoint
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+
+from numpy.typing import NDArray
+
+FloatArray = NDArray[np.float64]
+BoolArray = NDArray[np.bool_]
+IntArray = NDArray[np.intp]  # platform-index-sized int
+ExtCoArray = FloatArray  # extinction coefficient is float
+FigureAxes = Tuple[plt.Figure, plt.Axes]
 
 
 class VisMap:
@@ -68,31 +77,35 @@ class VisMap:
 
     def __init__(self):
         """Initialize the VisMap object."""
-        self.obstructions_array = None
-        self.fds_grid_shape = None
-        self.all_y_coords = None
-        self.all_x_coords = None
-        self.obstructions_collection = None
-        self.vismap_time_points = None
-        self.fds_time_points = None
-        self.quantity = "ext_coef_C0.9H0.1"
-        self.slc = None
-        self.start_point = None
-        self.all_wp_dict = {}
-        self.all_wp_distance_array_dict = {}
-        self.all_wp_non_concealed_cells_array_dict = {}
-        self.all_wp_angle_array_dict = {}
-        self.all_time_all_wp_vismap_array_list = []
-        self.all_wp_non_concealed_cells_xy_idx_dict = {}
-        self.min_vis = 0
-        self.max_vis = 30
-        self.fds_slc_height = None
-        self.background_image = None
-        self.all_time_wp_agg_vismap_list = []
-        self.time_agg_wp_agg_vismap = None
-        self.num_edge_cells = 1
-        self.cell_size = None
-        self.extent = None
+        self.obstructions_array: Optional[BoolArray] = None
+        self.fds_grid_shape: Optional[Tuple[int, int]] = None
+        self.all_y_coords: Optional[FloatArray] = None
+        self.all_x_coords: Optional[FloatArray] = None
+        self.obstructions_collection: Optional[Sequence[Any]] = None
+        self.vismap_time_points: Optional[FloatArray] = None
+        self.fds_time_points: Optional[FloatArray] = None
+        self.quantity: str = "ext_coef_C0.9H0.1"
+        self.slc: Optional[fds.Simulation.Slice] = None
+        self.start_point: Optional[Tuple[float, float]] = None
+        self.all_wp_dict: Dict[int, Waypoint] = {}
+        self.all_wp_distance_array_dict: Dict[int, FloatArray] = {}
+        self.all_wp_non_concealed_cells_array_dict: Dict[
+            int, Union[BoolArray, int]
+        ] = {}
+        self.all_wp_angle_array_dict: Dict[int, Union[FloatArray, int]] = {}
+        self.all_time_all_wp_vismap_array_list: List[List[BoolArray]] = []
+        self.all_wp_non_concealed_cells_xy_idx_dict: Dict[
+            int, Tuple[IntArray, IntArray]
+        ] = {}
+        self.min_vis: float = 0
+        self.max_vis: float = 30
+        self.fds_slc_height: Optional[float] = None
+        self.background_image: Optional[np.ndarray] = None
+        self.all_time_wp_agg_vismap_list: List[BoolArray] = []
+        self.time_agg_wp_agg_vismap: List[BoolArray] = None
+        self.num_edge_cells: int = 1
+        self.cell_size: Optional[Tuple[float, float]] = None
+        self.extent: Optional[np.ndarray] = None
 
     def set_time_points(self, time_points):
         """
