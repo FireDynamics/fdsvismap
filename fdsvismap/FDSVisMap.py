@@ -397,8 +397,8 @@ class VisMap:
                 self.all_wp_non_concealed_cells_array_dict[waypoint_id] = (
                     non_concealed_cells_array
                 )
-                self.all_wp_non_concealed_cells_xy_idx_dict[waypoint_id] = np.where(
-                    non_concealed_cells_array
+                self.all_wp_non_concealed_cells_xy_idx_dict[waypoint_id] = cast(Tuple[IntArray, IntArray], np.where(
+                    non_concealed_cells_array)
                 )
             else:
                 self.all_wp_non_concealed_cells_array_dict[waypoint_id] = 1
@@ -464,7 +464,7 @@ class VisMap:
             if obstructed_cells[0].size != 0:
                 # TODO: third argument is expected to be an array of floats (coordinates). But obstructed cells is an array of bools.
                 num_non_concealed_cells = count_cells_to_obstruction(
-                    line_x_idx, line_y_idx, obstructed_cells
+                    line_x_idx, line_y_idx, obstructed_cells #  type: ignore
                 )
                 non_concealed_cells_array[
                     line_x_idx[:num_non_concealed_cells],
