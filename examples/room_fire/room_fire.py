@@ -20,7 +20,7 @@ vis = VisMap()
 vis.read_fds_data(sim_dir, fds_slc_height=2)
 
 # Add background image.
-vis.add_background_image(bg_img)
+vis.add_background_image(str(bg_img))
 
 # Set starpoint and waypoints along escape route.
 vis.set_start_point(1, 9)
@@ -61,7 +61,7 @@ print("Time and waypoint aggregated Vismap saved as 'time_agg_wp_agg_vismap.pdf'
 plt.close()
 
 # Set parameters for local evaluations.
-time = 500
+simulation_time = 500
 x = 2
 y = 4
 c = 3
@@ -70,9 +70,9 @@ waypoint_id = 2
 print("\n")
 
 # Check if waypoint is visible from given location at given time.
-wp_is_visible = vis.wp_is_visible(time, x, y, waypoint_id)
+wp_is_visible = vis.wp_is_visible(simulation_time, x, y, waypoint_id)
 print(
-    f"Is waypoint {waypoint_id} visible at {time} s at coordinates X/Y = ({x},{y})?: {wp_is_visible}"
+    f"Is waypoint {waypoint_id} visible at {simulation_time} s at coordinates X/Y = ({x},{y})?: {wp_is_visible}"
 )
 
 # Get distance from waypoint to given location.
@@ -82,13 +82,13 @@ print(
 )
 
 # Calculate local visibility at given location and time, considering a specific c factor.
-local_visibility = vis.get_local_visibility(time, x, y, c)
+local_visibility = vis.get_local_visibility(simulation_time, x, y, c)
 print(
-    f"The local visibility at time {time} s and location X/Y = ({x},{y}) is {local_visibility:.2f} m."
+    f"The local visibility at time {simulation_time} s and location X/Y = ({x},{y}) is {local_visibility:.2f} m."
 )
 
 # Calculate visibility at given location and time relative to a waypoint, considering a specific c factor.
-visibility = vis.get_visibility_to_wp(time, x, y, waypoint_id)
+visibility = vis.get_visibility_to_wp(simulation_time, x, y, waypoint_id)
 print(
-    f"The visibility at time {time} s and location X/Y = ({x},{y}) relative to waypoint {waypoint_id} is {visibility:.2f} m."
+    f"The visibility at time {simulation_time} s and location X/Y = ({x},{y}) relative to waypoint {waypoint_id} is {visibility:.2f} m."
 )
