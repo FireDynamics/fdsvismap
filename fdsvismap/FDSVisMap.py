@@ -1,16 +1,15 @@
 """Module for creating visibility maps (VisMap) based on Fire Dynamics Simulator (FDS) data."""
 
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union, Literal, cast
+from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple, Union, cast
 
 import fdsreader as fds  # type: ignore[import-untyped]
 import matplotlib.colors
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
-from matplotlib.figure import Figure
-from matplotlib.axes import Axes
-
 import numpy as np
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from skimage.draw import line, line_aa
 
@@ -397,8 +396,8 @@ class VisMap:
                 self.all_wp_non_concealed_cells_array_dict[waypoint_id] = (
                     non_concealed_cells_array
                 )
-                self.all_wp_non_concealed_cells_xy_idx_dict[waypoint_id] = cast(Tuple[IntArray, IntArray], np.where(
-                    non_concealed_cells_array)
+                self.all_wp_non_concealed_cells_xy_idx_dict[waypoint_id] = cast(
+                    Tuple[IntArray, IntArray], np.where(non_concealed_cells_array)
                 )
             else:
                 self.all_wp_non_concealed_cells_array_dict[waypoint_id] = 1
@@ -464,7 +463,9 @@ class VisMap:
             if obstructed_cells[0].size != 0:
                 # TODO: third argument is expected to be an array of floats (coordinates). But obstructed cells is an array of bools.
                 num_non_concealed_cells = count_cells_to_obstruction(
-                    line_x_idx, line_y_idx, obstructed_cells #  type: ignore
+                    line_x_idx,
+                    line_y_idx,
+                    obstructed_cells,  #  type: ignore
                 )
                 non_concealed_cells_array[
                     line_x_idx[:num_non_concealed_cells],
