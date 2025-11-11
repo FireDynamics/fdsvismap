@@ -1,5 +1,4 @@
 name: Code Quality
-
 on:
   push:
     branches: [ main ]
@@ -7,24 +6,29 @@ on:
     branches: [ main ]
 
 jobs:
-  lint:
-    name: Run Ruff
+  quality:
+    name: Lint, Format, Type Check
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
+      
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
-      - name: Install Ruff
-        run: pip install ruff
-
-      - name: Run Ruff lint
+      
+      - name: Install dependencies
+        run: |
+          pip install ruff mypy numpy scipy matplotlib scikit-image
+          # Try to install fdsreader, but don't fail if unavailable
+          pip install fdsreader || true
+      
+      - name: Ruff lint
         run: ruff check .
-
-      - name: Run Ruff format check (optional)
+      
+      - name: Ruff format check
         run: ruff format --check .
+      
+      - name: MyPy type check
+        run: mypy fdsvismap/ --disallow-untyped-defs --ignore-missing-imports --no-warn-return-any
