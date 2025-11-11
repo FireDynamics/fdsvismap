@@ -21,12 +21,14 @@ repos:
         name: Check type hints (mypy)
         args:
           - --disallow-untyped-defs
-          - --warn-unused-ignores
+          - --ignore-missing-imports
           - --no-warn-return-any
         additional_dependencies: [
             "numpy~=2.1",
             "pandas~=2.2.3",
             "scipy~=1.14",
-            "matplotlib~=3.9"
+            "matplotlib~=3.9",
+            "scikit-image",
+            "fdsreader"
         ]
         exclude: "(^docs/|^scripts/|^tests/)"
