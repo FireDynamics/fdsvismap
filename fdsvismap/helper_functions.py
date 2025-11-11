@@ -2,7 +2,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 
-def get_id_of_closest_value(values_array: NDArray[np.floating], value: float) -> float:
+def get_id_of_closest_value(values_array: NDArray[np.floating], value: float) -> int:
     """
     Find the closest point in a given coordinate array to a given value.
 
