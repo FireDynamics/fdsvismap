@@ -1,12 +1,15 @@
 """Module for creating visibility maps (VisMap) based on Fire Dynamics Simulator (FDS) data."""
 
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union, Literal, cast
 
-import fdsreader as fds  # type: ignore[import]  # no stubs available
+import fdsreader as fds  # type: ignore[import-untyped]
 import matplotlib.colors
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
+from matplotlib.figure import Figure
+from matplotlib.axes import Axes
+
 import numpy as np
 from numpy.typing import NDArray
 from skimage.draw import line, line_aa
@@ -21,7 +24,7 @@ FloatArray = NDArray[np.float64]
 BoolArray = NDArray[np.bool_]
 IntArray = NDArray[np.intp]  # platform-index-sized int
 ExtCoArray = FloatArray  # extinction coefficient is float
-FigureAxes = Tuple[plt.Figure, plt.Axes]
+FigureAxes = Tuple[Figure, Axes]
 
 
 class VisMap:
@@ -76,7 +79,7 @@ class VisMap:
     :vartype num_edge_cells: int
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the VisMap object."""
         self.obstructions_array: BoolArray = np.array([], dtype=bool)
         self.vismap_time_points: FloatArray = np.array([], dtype=float)
@@ -150,9 +153,9 @@ class VisMap:
         waypoint_id: int,
         x: float,
         y: float,
+        alpha: int,  # TODO: alpha is not optional. Kristian confirm.
         c: int = 3,
-        alpha: Optional[int] = None,
-    ):
+    ) -> None:
         """
         Add a waypoint along the route of egress.
 
@@ -165,7 +168,7 @@ class VisMap:
         :param c: Contrast factor for exit sign according to Jin.
         :type c: int, optional
         :param alpha: Orientation angle of the exit sign according to global FDS coordinates.
-        :type alpha: int or None, optional
+        :type alpha: int
         """
         self.all_wp_dict[waypoint_id] = Waypoint(x, y, c, alpha)
 
@@ -207,7 +210,7 @@ class VisMap:
                 "OD_C",
                 "OD_C0.9H0.1",
                 "SOOT OPTICAL DENSITY",
-                "OPTICAL DENSITY"
+                "OPTICAL DENSITY",
             ]:
                 self.slc = sim.slices.filter_by_quantity(
                     "SOOT OPTICAL DENSITY"
@@ -236,16 +239,21 @@ class VisMap:
         :return: Array of extinction coefficients at the specified time.
         :rtype: np.ndarray
         """
+        if self.slc is None:
+            raise RuntimeError("FDS data not loaded. Call read_fds_data() first.")
+
         time_index = self.slc.get_nearest_timestep(time)
+        extco_data = cast(ExtCoArray, self.slc.to_global()[time_index])
         if self.quantity in [
             "OD_C",
             "OD_C0.9H0.1",
             "SOOT OPTICAL DENSITY",
-            "OPTICAL DENSITY"
+            "OPTICAL DENSITY",
         ]:
-            extco_array = self.slc.to_global()[time_index] * np.log(10)
+            extco_array: ExtCoArray = extco_data * np.log(10)
         else:
-            extco_array = self.slc.to_global()[time_index]
+            extco_array = extco_data
+
         return extco_array
 
     def _get_non_concealed_cells_idx(
@@ -288,7 +296,7 @@ class VisMap:
 
         for x_id, y_id in zip(non_concealed_x_idx, non_concealed_y_idx):
             img = np.zeros_like(extco_array)
-            x_lp_idx, y_lp_idx = line(ref_x_id, ref_y_id, x_id, y_id)
+            x_lp_idx, y_lp_idx = line(ref_x_id, ref_y_id, x_id, y_id)  # type: ignore
             img[x_lp_idx, y_lp_idx] = 1
             n_cells = len(x_lp_idx)
             mean_extco = np.sum(extco_array * img) / n_cells
@@ -306,8 +314,9 @@ class VisMap:
         """
         wp = self.all_wp_dict[waypoint_id]
         self.xv, self.yv = np.meshgrid(self.all_x_coords, self.all_y_coords)
-        distance_array = np.linalg.norm(
-            np.array([self.xv - wp.x, self.yv - wp.y]), axis=0
+        distance_array: FloatArray = cast(
+            FloatArray,
+            np.linalg.norm(np.array([self.xv - wp.x, self.yv - wp.y]), axis=0),
         )
         return distance_array
 
@@ -322,18 +331,22 @@ class VisMap:
         """
         distance_array = self._get_dist_array(waypoint_id)
         wp = self.all_wp_dict[waypoint_id]
+        view_angle_array: FloatArray
         if wp.alpha is not None:
-            view_angle_array = np.clip(
-                (
-                    np.sin(np.deg2rad(wp.alpha)) * (self.xv - wp.x)
-                    + np.cos(np.deg2rad(wp.alpha)) * (self.yv - wp.y)
-                )
-                / distance_array,
-                0,
-                1,
+            view_angle_array = cast(
+                FloatArray,
+                np.clip(
+                    (
+                        np.sin(np.deg2rad(wp.alpha)) * (self.xv - wp.x)
+                        + np.cos(np.deg2rad(wp.alpha)) * (self.yv - wp.y)
+                    )
+                    / distance_array,
+                    0,
+                    1,
+                ),
             )
         else:
-            view_angle_array = np.ones_like(distance_array)
+            view_angle_array = np.ones_like(distance_array).astype(np.float64)
         return view_angle_array
 
     def build_obstructions_array(self) -> None:
@@ -346,7 +359,7 @@ class VisMap:
         """
         # Initialize arrays for external collisions and cell obstructions
         meshgrid = self._get_extco_array_at_time(0)
-        obstruction_array = np.zeros_like(meshgrid).T
+        obstruction_array = np.zeros_like(meshgrid, dtype=bool).T
 
         # Update the obstruction_matrix based on defined obstructions and their height ranges
         for obstruction in self.obstructions_collection:
@@ -438,7 +451,7 @@ class VisMap:
 
         # Iterate through edge cells to update visibility based on obstructions
         for x_id, y_id in zip(edge_x_idx, edge_y_idx):
-            line_x_idx, line_y_idx = line_func(closest_x_id, closest_y_id, x_id, y_id)[
+            line_x_idx, line_y_idx = line_func(closest_x_id, closest_y_id, x_id, y_id)[  # type: ignore
                 :2
             ]
 
@@ -449,6 +462,7 @@ class VisMap:
 
             # If line intersects obstructions, mark only the segment before the first obstruction as visible
             if obstructed_cells[0].size != 0:
+                # TODO: third argument is expected to be an array of floats (coordinates). But obstructed cells is an array of bools.
                 num_non_concealed_cells = count_cells_to_obstruction(
                     line_x_idx, line_y_idx, obstructed_cells
                 )
@@ -549,6 +563,9 @@ class VisMap:
         """
         if not max_time:
             max_time = self.vismap_time_points[-1]
+
+        if self.fds_grid_shape is None:
+            raise RuntimeError("FDS data not loaded. Call read_fds_data() first.")
         aset_map = np.full(
             (self.fds_grid_shape[1], self.fds_grid_shape[0]), max_time, dtype=int
         )
@@ -561,7 +578,7 @@ class VisMap:
 
     def _create_map_plot(
         self,
-        map_array: FloatArray,
+        map_array: Union[BoolArray, IntArray],
         cmap: Union[str, mcolors.Colormap],
         plot_obstructions: bool,
         flip_y_axis: bool,
@@ -585,7 +602,7 @@ class VisMap:
         :rtype: (matplotlib.figure.Figure, matplotlib.axes._subplots.AxesSubplot)
 
         """
-        origin = "lower" if flip_y_axis else "upper"
+        origin: Literal["upper", "lower"] = "lower" if flip_y_axis else "upper"
         if flip_y_axis:
             extent = (
                 self.all_x_coords[0],
@@ -713,7 +730,9 @@ class VisMap:
         """
         self.background_image = np.flip(plt.imread(file), axis=0)
 
-    def compute_all(self, view_angle=True, obstructions=True, aa=True):
+    def compute_all(
+        self, view_angle: bool = True, obstructions: bool = True, aa: bool = True
+    ) -> None:
         """
         Execute all required computations to generate aggregated visibility maps over all waypoints and time points.
 
@@ -768,9 +787,9 @@ class VisMap:
         ]  # TODO: Why are coordinates switched for extco array?
         if local_extco == 0:
             return self.max_vis
-        else:
-            local_visibility = c / local_extco
-            return min(local_visibility, self.max_vis)
+
+        visibility: float = min(c / local_extco, self.max_vis)
+        return visibility
 
     def get_visibility_to_wp(
         self, time: float, x: float, y: float, waypoint_id: int
@@ -798,7 +817,7 @@ class VisMap:
             waypoint_id
         ]
         masked_visibility_array = visibility_array * non_concealed_cells_array
-        visibility = masked_visibility_array[ref_y_id, ref_x_id]
+        visibility = float(masked_visibility_array[ref_y_id, ref_x_id])
         return visibility
 
     def wp_is_visible(self, time: float, x: float, y: float, waypoint_id: int) -> bool:
@@ -820,7 +839,7 @@ class VisMap:
         ref_x_id = get_id_of_closest_value(self.all_x_coords, x)
         ref_y_id = get_id_of_closest_value(self.all_y_coords, y)
         vismap_array = self.all_time_all_wp_vismap_array_list[time_id][waypoint_id]
-        is_visible = vismap_array[ref_y_id, ref_x_id]
+        is_visible = bool(vismap_array[ref_y_id, ref_x_id])
         return is_visible
 
     def get_distance_to_wp(self, x: float, y: float, waypoint_id: int) -> float:
@@ -837,7 +856,7 @@ class VisMap:
         :rtype: float
         """
         wp = self.all_wp_dict[waypoint_id]
-        distance_to_wp = np.linalg.norm(np.array([x - wp.x, y - wp.y]), axis=0)
+        distance_to_wp = float(np.linalg.norm(np.array([x - wp.x, y - wp.y]), axis=0))
         return distance_to_wp
 
     def _add_visual_object(

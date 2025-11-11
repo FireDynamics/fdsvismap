@@ -15,10 +15,10 @@ class Waypoint:
     :param c: Contrast factor for exit sign according to JIN.
     :type c: int
     :param alpha: Orientation angle of the exit sign in the global coordinate system.
-    :type alpha: float
+    :type alpha: int
     """
 
     x: float
     y: float
     c: float
-    alpha: float
+    alpha: int

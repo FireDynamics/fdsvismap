@@ -13,13 +13,13 @@ def get_id_of_closest_value(values_array: NDArray[np.floating], value: float) ->
     :return: The index of the closest value in an array to a given value.
     :rtype: int
     """
-    return (np.abs(values_array - value)).argmin()
+    return int((np.abs(values_array - value)).argmin())
 
 
 def count_cells_to_obstruction(
-    line_x: NDArray[np.floating],
-    line_y: NDArray[np.floating],
-    obstruction: NDArray[np.floating],
+    line_x: NDArray[np.float64],
+    line_y: NDArray[np.float64],
+    obstruction: NDArray[np.float64],
 ) -> int:
     """
     Calculate the number of cells until the line intersects with an obstruction.
