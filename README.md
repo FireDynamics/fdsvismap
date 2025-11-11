@@ -8,25 +8,36 @@
 
 ---
 
-**FDSVisMap** is a Python tool for **waypoint-based assessment of visibility** in the context of **performance-based fire safety design**.  
+**FDSVisMap** is a Python tool for **waypoint-based assessment of visibility** in the context of **performance-based fire safety design**.
+
 It provides methods for analyzing and visualizing **visibility maps (Vismaps)** derived from FDS (Fire Dynamics Simulator) output data.
 
 ---
 
-## Installation
-
+## Installation & Setup
 
 ```bash
 pip install fdsvismap
 ```
 
-## Developement
-
-To run code quality checks with Ruff, you can use the following command locally:
+### Installation with uv
 
 ```bash
-ruff check .
-ruff format --check .
+# Install dependencies
+uv sync
+
+# Install in editable mode with dev dependencies
+uv sunc --extra dev
+```
+
+### Running Tests Locally
+
+To run code quality checks, you can use the following command locally:
+
+```bash
+# Run all quality checks (linting, formatting, type checking)
+# as well as the tests.
+./scripts/ci.sh
 ```
 
 ## Citation 
