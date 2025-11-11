@@ -4,28 +4,40 @@
 [![Code Quality](https://github.com/FireDynamics/fdsvismap/actions/workflows/code_quality.yml/badge.svg)](https://github.com/FireDynamics/fdsvismap/actions/workflows/code_quality.yml)
 [![License](https://img.shields.io/github/license/FireDynamics/fdsvismap.svg)](https://github.com/FireDynamics/fdsvismap/blob/main/LICENSE)
 [![Python Versions](https://img.shields.io/pypi/pyversions/fdsvismap.svg)](https://pypi.org/project/fdsvismap/)
+![type checked with mypy](https://img.shields.io/badge/type%20checked-mypy-039dfc)
 
 ---
 
-**FDSVisMap** is a Python tool for **waypoint-based assessment of visibility** in the context of **performance-based fire safety design**.  
+**FDSVisMap** is a Python tool for **waypoint-based assessment of visibility** in the context of **performance-based fire safety design**.
+
 It provides methods for analyzing and visualizing **visibility maps (Vismaps)** derived from FDS (Fire Dynamics Simulator) output data.
 
 ---
 
-## Installation
-
+## Installation & Setup
 
 ```bash
 pip install fdsvismap
 ```
 
-## Developement
-
-To run code quality checks with Ruff, you can use the following command locally:
+### Installation with uv
 
 ```bash
-ruff check .
-ruff format --check .
+# Install dependencies
+uv sync
+
+# Install in editable mode with dev dependencies
+uv sunc --extra dev
+```
+
+### Running Tests Locally
+
+To run code quality checks, you can use the following command locally:
+
+```bash
+# Run all quality checks (linting, formatting, type checking)
+# as well as the tests.
+./scripts/ci.sh
 ```
 
 ## Citation 
