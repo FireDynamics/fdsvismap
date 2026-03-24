@@ -58,6 +58,62 @@ url = {https://www.sciencedirect.com/science/article/pii/S0379711224001826},
 }
 ```
 
+## FDS Slice File (SLCF) Requirements
+
+FDSVisMap requires specific slice file data from your FDS simulation. The tool uses **soot extinction coefficient** or **soot optical density** to calculate visibility.
+
+### Required FDS Input
+
+Add the following to your FDS input file (`.fds`):
+
+```fds
+&SLCF QUANTITY='SOOT EXTINCTION COEFFICIENT', PBX=0.1, /
+```
+
+Or for optical density:
+
+```fds
+&SLCF QUANTITY='SOOT OPTICAL DENSITY', PBX=0.1, /
+```
+
+- `PBX=0.1` specifies the slice plane spacing in the x-direction (adjust as needed)
+- The height is specified in Python via `fds_slc_height`
+
+### Supported Quantities
+
+| Python `quantity` value | FDS Quantity |
+|------------------------|--------------|
+| `ext_coef_C` (default) | `SOOT EXTINCTION COEFFICIENT` |
+| `ext_coef_C0.9H0.1` | `SOOT EXTINCTION COEFFICIENT` |
+| `OD_C` | `SOOT OPTICAL DENSITY` |
+| `OD_C0.9H0.1` | `SOOT OPTICAL DENSITY` |
+
+### Python Usage
+
+```python
+vis = VisMap()
+
+# Default: uses 'SOOT EXTINCTION COEFFICIENT'
+vis.read_fds_data(sim_dir, fds_slc_height=2.0)
+
+# Or explicitly set the quantity
+vis.quantity = 'SOOT EXTINCTION COEFFICIENT'
+vis.read_fds_data(sim_dir, fds_slc_height=2.0)
+
+# Or use optical density
+vis.quantity = 'SOOT OPTICAL DENSITY'
+vis.read_fds_data(sim_dir, fds_slc_height=2.0)
+```
+
+### Integration with fdsreader
+
+FDSVisMap uses [fdsreader](https://github.com/firemodels/fdsreader) internally to read FDS output files. The `read_fds_data()` method automatically handles:
+- Loading the simulation directory via `fds.Simulation(sim_dir)`
+- Finding the appropriate slice file by quantity and height
+- Extracting grid coordinates and time points
+
+No manual fdsreader usage is required.
+
 ## Usage Example
 
 ```python
