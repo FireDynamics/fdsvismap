@@ -88,20 +88,20 @@ Or for optical density:
 | `OD_C` | `SOOT OPTICAL DENSITY` |
 | `OD_C0.9H0.1` | `SOOT OPTICAL DENSITY` |
 
-### Python Usage
+You can set `vis.quantity` either to these Python-side names (recommended) or to the corresponding FDS `QUANTITY` strings (for example, `'SOOT EXTINCTION COEFFICIENT'` or `'SOOT OPTICAL DENSITY'`); both forms are accepted as aliases.
 
 ```python
 vis = VisMap()
 
-# Default: uses 'SOOT EXTINCTION COEFFICIENT'
+# Default: uses 'SOOT EXTINCTION COEFFICIENT' (Python-side name: "ext_coef_C")
 vis.read_fds_data(sim_dir, fds_slc_height=2.0)
 
-# Or explicitly set the quantity
-vis.quantity = 'SOOT EXTINCTION COEFFICIENT'
+# Or explicitly set the quantity using the Python-side name
+vis.quantity = "ext_coef_C"
 vis.read_fds_data(sim_dir, fds_slc_height=2.0)
 
-# Or use optical density
-vis.quantity = 'SOOT OPTICAL DENSITY'
+# Or use optical density (Python-side name: "OD_C")
+vis.quantity = "OD_C"
 vis.read_fds_data(sim_dir, fds_slc_height=2.0)
 ```
 
