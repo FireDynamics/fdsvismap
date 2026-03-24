@@ -76,8 +76,8 @@ Or for optical density:
 &SLCF QUANTITY='SOOT OPTICAL DENSITY', PBX=0.1, /
 ```
 
-- `PBX=0.1` specifies the slice plane spacing in the x-direction (adjust as needed)
-- The height is specified in Python via `fds_slc_height`
+- `PBX=0.1` sets the x-coordinate (position) of the slice plane (adjust as needed).
+- The slice plane height (z-coordinate, corresponding to `PBZ` in FDS) is selected in Python via `fds_slc_height`.
 
 ### Supported Quantities
 
