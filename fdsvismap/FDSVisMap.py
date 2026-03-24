@@ -81,7 +81,7 @@ class VisMap:
     :vartype all_time_all_wp_vismap_array_list: list[list[np.ndarray]]
     :ivar all_wp_non_concealed_cells_xy_idx_dict: Dictionary of indices of non-concealed cells for each waypoint. Initialized as an empty list.
     :vartype all_wp_non_concealed_cells_xy_idx_dict: dict[tuple[np.ndarray, np.ndarray]]
-    :ivar all_wp_ray_casting_cache_dict: Dictionary storing pre-computed ray casting data (line indices and cell counts) for each waypoint. Initialized as an empty list.
+    :ivar all_wp_ray_casting_cache_dict: Dictionary storing pre-computed ray casting data (line indices and cell counts) for each waypoint. Initialized as an empty dict.
     :vartype all_wp_ray_casting_cache_dict: dict[int, RayCastingCache]
     :ivar min_vis: Minimum local visibility threshold to meet performance criteria. Initialized to 0.
     :vartype min_vis: float
