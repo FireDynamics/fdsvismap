@@ -1,6 +1,17 @@
 """Module for creating visibility maps (VisMap) based on Fire Dynamics Simulator (FDS) data."""
 
-from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple, Union, cast
+from typing import (
+    Any,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Sequence,
+    Tuple,
+    TypedDict,
+    Union,
+    cast,
+)
 
 import fdsreader as fds  # type: ignore[import-untyped]
 import matplotlib.colors
@@ -24,6 +35,14 @@ BoolArray = NDArray[np.bool_]
 IntArray = NDArray[np.intp]  # platform-index-sized int
 ExtCoArray = FloatArray  # extinction coefficient is float
 FigureAxes = Tuple[Figure, Axes]
+
+
+class RayCastingCache(TypedDict):
+    ray_paths_x: list[IntArray]
+    ray_paths_y: list[IntArray]
+    ray_cell_counts: IntArray
+    non_concealed_x_idx: IntArray
+    non_concealed_y_idx: IntArray
 
 
 class VisMap:
@@ -62,6 +81,8 @@ class VisMap:
     :vartype all_time_all_wp_vismap_array_list: list[list[np.ndarray]]
     :ivar all_wp_non_concealed_cells_xy_idx_dict: Dictionary of indices of non-concealed cells for each waypoint. Initialized as an empty list.
     :vartype all_wp_non_concealed_cells_xy_idx_dict: dict[tuple[np.ndarray, np.ndarray]]
+    :ivar all_wp_ray_casting_cache_dict: Dictionary storing pre-computed ray casting data (line indices and cell counts) for each waypoint. Initialized as an empty list.
+    :vartype all_wp_ray_casting_cache_dict: dict[int, RayCastingCache]
     :ivar min_vis: Minimum local visibility threshold to meet performance criteria. Initialized to 0.
     :vartype min_vis: float
     :ivar max_vis: Maximum visibility threshold. Initialized to 30.
@@ -94,6 +115,7 @@ class VisMap:
         self.all_wp_non_concealed_cells_xy_idx_dict: Dict[
             int, Tuple[IntArray, IntArray]
         ] = {}
+        self.all_wp_ray_casting_cache_dict: Dict[int, RayCastingCache] = {}
         self.min_vis: float = 0.0
         self.max_vis: float = 30
         self.background_image: np.ndarray = np.array([])
@@ -283,22 +305,21 @@ class VisMap:
         :return: A 2D numpy array with the mean extinction coefficients at the specified time, transposed for correct orientation.
         :rtype: np.ndarray
         """
-        wp = self.all_wp_dict[waypoint_id]
         extco_array = self._get_extco_array_at_time(time)
-        ref_x_id = get_id_of_closest_value(self.all_x_coords, wp.x)
-        ref_y_id = get_id_of_closest_value(self.all_y_coords, wp.y)
         mean_extco_array = np.zeros_like(extco_array)
 
-        non_concealed_x_idx, non_concealed_y_idx = self._get_non_concealed_cells_idx(
-            waypoint_id
-        )
+        cache = self.all_wp_ray_casting_cache_dict[waypoint_id]
+        ray_paths_x = cache["ray_paths_x"]
+        ray_paths_y = cache["ray_paths_y"]
+        ray_cell_counts = cache["ray_cell_counts"]
+        non_concealed_x_idx = cache["non_concealed_x_idx"]
+        non_concealed_y_idx = cache["non_concealed_y_idx"]
 
-        for x_id, y_id in zip(non_concealed_x_idx, non_concealed_y_idx):
-            img = np.zeros_like(extco_array)
-            x_lp_idx, y_lp_idx = line(ref_x_id, ref_y_id, x_id, y_id)  # type: ignore
-            img[x_lp_idx, y_lp_idx] = 1
-            n_cells = len(x_lp_idx)
-            mean_extco = np.sum(extco_array * img) / n_cells
+        for i, (x_id, y_id) in enumerate(zip(non_concealed_x_idx, non_concealed_y_idx)):
+            x_lp_idx = ray_paths_x[i]
+            y_lp_idx = ray_paths_y[i]
+            n_cells = ray_cell_counts[i]
+            mean_extco = np.sum(extco_array[x_lp_idx, y_lp_idx]) / n_cells
             mean_extco_array[x_id, y_id] = mean_extco
         return mean_extco_array.T
 
@@ -411,6 +432,43 @@ class VisMap:
             self.all_wp_distance_array_dict[waypoint_id] = self._get_dist_array(
                 waypoint_id
             )
+            self._build_ray_casting_cache(waypoint_id)
+
+    def _build_ray_casting_cache(self, waypoint_id: int) -> None:
+        """
+        Pre-compute and cache ray casting data for a waypoint.
+
+        Stores the line indices and cell counts for all non-concealed cells relative to a waypoint.
+        This avoids recalculating ray paths at every timestep.
+
+        :param waypoint_id: The index of the waypoint for which to build the cache.
+        :type waypoint_id: int
+        """
+        wp = self.all_wp_dict[waypoint_id]
+        ref_x_id = get_id_of_closest_value(self.all_x_coords, wp.x)
+        ref_y_id = get_id_of_closest_value(self.all_y_coords, wp.y)
+
+        non_concealed_x_idx, non_concealed_y_idx = self._get_non_concealed_cells_idx(
+            waypoint_id
+        )
+
+        ray_paths_x: List[IntArray] = []
+        ray_paths_y: List[IntArray] = []
+        ray_cell_counts: List[int] = []
+
+        for x_id, y_id in zip(non_concealed_x_idx, non_concealed_y_idx):
+            x_lp_idx, y_lp_idx = line(ref_x_id, ref_y_id, x_id, y_id)
+            ray_paths_x.append(x_lp_idx)
+            ray_paths_y.append(y_lp_idx)
+            ray_cell_counts.append(len(x_lp_idx))
+
+        self.all_wp_ray_casting_cache_dict[waypoint_id] = {
+            "ray_paths_x": ray_paths_x,
+            "ray_paths_y": ray_paths_y,
+            "ray_cell_counts": np.array(ray_cell_counts, dtype=np.intp),
+            "non_concealed_x_idx": non_concealed_x_idx,
+            "non_concealed_y_idx": non_concealed_y_idx,
+        }
 
     def _get_non_concealed_cells_array(
         self, waypoint_id: int, aa: bool = True
