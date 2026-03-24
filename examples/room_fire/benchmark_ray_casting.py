@@ -4,15 +4,23 @@ import time
 from pathlib import Path
 
 import numpy as np
+from numpy.typing import NDArray
 from skimage.draw import line
 
 from fdsvismap import VisMap
 from fdsvismap.helper_functions import get_id_of_closest_value
 
+FloatArray = NDArray[np.float64]
+IntArray = NDArray[np.intp]
+
 
 def old_ray_casting(
-    extco_array, ref_x_id, ref_y_id, non_concealed_x_idx, non_concealed_y_idx
-):
+    extco_array: FloatArray,
+    ref_x_id: int,
+    ref_y_id: int,
+    non_concealed_x_idx: IntArray,
+    non_concealed_y_idx: IntArray,
+) -> FloatArray:
     mean_extco_array = np.zeros_like(extco_array)
     for x_id, y_id in zip(non_concealed_x_idx, non_concealed_y_idx):
         img = np.zeros_like(extco_array)
@@ -25,13 +33,13 @@ def old_ray_casting(
 
 
 def new_ray_casting(
-    extco_array,
-    ray_paths_x,
-    ray_paths_y,
-    ray_cell_counts,
-    non_concealed_x_idx,
-    non_concealed_y_idx,
-):
+    extco_array: FloatArray,
+    ray_paths_x: list[IntArray],
+    ray_paths_y: list[IntArray],
+    ray_cell_counts: IntArray,
+    non_concealed_x_idx: IntArray,
+    non_concealed_y_idx: IntArray,
+) -> FloatArray:
     mean_extco_array = np.zeros_like(extco_array)
     for i, (x_id, y_id) in enumerate(zip(non_concealed_x_idx, non_concealed_y_idx)):
         x_lp_idx = ray_paths_x[i]
@@ -42,7 +50,7 @@ def new_ray_casting(
     return mean_extco_array
 
 
-def benchmark():
+def benchmark() -> None:
     project_root = Path(__file__).parent
     sim_dir = str(project_root / "fds_data")
 
