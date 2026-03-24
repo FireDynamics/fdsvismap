@@ -422,6 +422,10 @@ class VisMap:
                 )
             else:
                 self.all_wp_non_concealed_cells_array_dict[waypoint_id] = 1
+                self.all_wp_non_concealed_cells_xy_idx_dict[waypoint_id] = cast(
+                    Tuple[IntArray, IntArray],
+                    np.where(np.ones_like(self.obstructions_array, dtype=bool)),
+                )
             if view_angle:
                 self.all_wp_angle_array_dict[waypoint_id] = self._get_view_angle_array(
                     waypoint_id
