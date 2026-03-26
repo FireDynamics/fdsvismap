@@ -22,6 +22,8 @@ dependencies = [
     "scikit-image ~= 0.23.2",
     "fdsreader ~= 1.11.5",
     "pytest>=8.4.2",
+    "sphinx >= 7.2.6",
+    "sphinx-rtd-theme >= 2.0.0",
 ]
 
 [project.urls]

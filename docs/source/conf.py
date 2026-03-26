@@ -5,6 +5,7 @@
 
 import os
 import sys
+from importlib.metadata import version as get_version
 
 sys.path.insert(0, os.path.abspath("../.."))
 
@@ -14,7 +15,7 @@ sys.path.insert(0, os.path.abspath("../.."))
 project = "FDSVismap"
 copyright = "2025, Kristian Börger"
 author = "Kristian Börger"
-release = "0.1.3"
+release = get_version('fdsvismap')
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
