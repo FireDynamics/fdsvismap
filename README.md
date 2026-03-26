@@ -67,16 +67,16 @@ FDSVisMap requires specific slice file data from your FDS simulation. The tool u
 Add the following to your FDS input file (`.fds`):
 
 ```fds
-&SLCF QUANTITY='SOOT EXTINCTION COEFFICIENT', PBX=0.1, /
+&SLCF QUANTITY='SOOT EXTINCTION COEFFICIENT', PBZ=2.0, /
 ```
 
 Or for optical density:
 
 ```fds
-&SLCF QUANTITY='SOOT OPTICAL DENSITY', PBX=0.1, /
+&SLCF QUANTITY='SOOT OPTICAL DENSITY', PBZ=2.0, /
 ```
 
-- `PBX=0.1` sets the x-coordinate (position) of the slice plane (adjust as needed).
+- `PBZ=2.0` sets the z-coordinate (position) of the slice plane (adjust as needed).
 - The slice plane height (z-coordinate, corresponding to `PBZ` in FDS) is selected in Python via `fds_slc_height`.
 
 ### Supported Quantities
