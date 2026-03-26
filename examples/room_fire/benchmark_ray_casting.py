@@ -86,7 +86,7 @@ def benchmark() -> None:
         grid_shape = (len(vis.all_x_coords), len(vis.all_y_coords))
 
         # Correctness check with first timestep
-        extco_array = vis._get_extco_array_at_time(times[0])
+        extco_array = vis.get_extco_array_at_time(times[0])
         old_result = old_ray_casting(
             extco_array, ref_x_id, ref_y_id, non_concealed_x_idx, non_concealed_y_idx
         )
@@ -107,7 +107,7 @@ def benchmark() -> None:
 
         start = time.perf_counter()
         for t in times:
-            extco_array = vis._get_extco_array_at_time(t)
+            extco_array = vis.get_extco_array_at_time(t)
             old_ray_casting(
                 extco_array,
                 ref_x_id,
@@ -119,7 +119,7 @@ def benchmark() -> None:
 
         start = time.perf_counter()
         for t in times:
-            extco_array = vis._get_extco_array_at_time(t)
+            extco_array = vis.get_extco_array_at_time(t)
             new_ray_casting(
                 extco_array,
                 ray_paths_x,

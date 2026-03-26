@@ -251,7 +251,7 @@ class VisMap:
         self.fds_slc_height = fds_slc_height
         self.build_obstructions_array()
 
-    def _get_extco_array_at_time(self, time: float) -> ExtCoArray:
+    def get_extco_array_at_time(self, time: float) -> ExtCoArray:
         """
         Get the array of extinction coefficients from the relevant slice file closest to the given time.
 
@@ -305,7 +305,7 @@ class VisMap:
         :return: A 2D numpy array with the mean extinction coefficients at the specified time, transposed for correct orientation.
         :rtype: np.ndarray
         """
-        extco_array = self._get_extco_array_at_time(time)
+        extco_array = self.get_extco_array_at_time(time)
         mean_extco_array = np.zeros_like(extco_array)
 
         cache = self.all_wp_ray_casting_cache_dict[waypoint_id]
@@ -378,7 +378,7 @@ class VisMap:
         (fds_slc_height) to determine if an obstruction at a given location blocks visibility.
         """
         # Initialize arrays for external collisions and cell obstructions
-        meshgrid = self._get_extco_array_at_time(0)
+        meshgrid = self.get_extco_array_at_time(0)
         obstruction_array = np.zeros_like(meshgrid, dtype=bool).T
 
         # Update the obstruction_matrix based on defined obstructions and their height ranges
@@ -844,7 +844,7 @@ class VisMap:
         """
         ref_x_id = get_id_of_closest_value(self.all_x_coords, x)
         ref_y_id = get_id_of_closest_value(self.all_y_coords, y)
-        extco_array = self._get_extco_array_at_time(time)
+        extco_array = self.get_extco_array_at_time(time)
         local_extco = extco_array[
             ref_x_id, ref_y_id
         ]  # TODO: Why are coordinates switched for extco array?
