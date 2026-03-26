@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.abspath("../.."))
 project = "FDSVismap"
 copyright = "2025, Kristian Börger"
 author = "Kristian Börger"
-release = get_version('fdsvismap')
+release = get_version("fdsvismap")
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
