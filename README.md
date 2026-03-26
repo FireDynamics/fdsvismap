@@ -58,6 +58,62 @@ url = {https://www.sciencedirect.com/science/article/pii/S0379711224001826},
 }
 ```
 
+## FDS Slice File (SLCF) Requirements
+
+FDSVisMap requires specific slice file data from your FDS simulation. The tool uses **soot extinction coefficient** or **soot optical density** to calculate visibility.
+
+### Required FDS Input
+
+Add the following to your FDS input file (`.fds`):
+
+```fds
+&SLCF QUANTITY='SOOT EXTINCTION COEFFICIENT', PBZ=2.0, /
+```
+
+Or for optical density:
+
+```fds
+&SLCF QUANTITY='SOOT OPTICAL DENSITY', PBZ=2.0, /
+```
+
+- `PBZ=2.0` sets the z-coordinate (position) of the slice plane (adjust as needed).
+- The slice plane height (z-coordinate, corresponding to `PBZ` in FDS) is selected in Python via `fds_slc_height`.
+
+### Supported Quantities
+
+| Python `quantity` value | FDS Quantity |
+|------------------------|--------------|
+| `ext_coef_C` (default) | `SOOT EXTINCTION COEFFICIENT` |
+| `ext_coef_C0.9H0.1` | `SOOT EXTINCTION COEFFICIENT` |
+| `OD_C` | `SOOT OPTICAL DENSITY` |
+| `OD_C0.9H0.1` | `SOOT OPTICAL DENSITY` |
+
+You can set `vis.quantity` either to these Python-side names (recommended) or to the corresponding FDS `QUANTITY` strings (for example, `'SOOT EXTINCTION COEFFICIENT'` or `'SOOT OPTICAL DENSITY'`); both forms are accepted as aliases.
+
+```python
+vis = VisMap()
+
+# Default: uses 'SOOT EXTINCTION COEFFICIENT' (Python-side name: "ext_coef_C")
+vis.read_fds_data(sim_dir, fds_slc_height=2.0)
+
+# Or explicitly set the quantity using the Python-side name
+vis.quantity = "ext_coef_C"
+vis.read_fds_data(sim_dir, fds_slc_height=2.0)
+
+# Or use optical density (Python-side name: "OD_C")
+vis.quantity = "OD_C"
+vis.read_fds_data(sim_dir, fds_slc_height=2.0)
+```
+
+### Integration with fdsreader
+
+FDSVisMap uses [fdsreader](https://github.com/firemodels/fdsreader) internally to read FDS output files. The `read_fds_data()` method automatically handles:
+- Loading the simulation directory via `fds.Simulation(sim_dir)`
+- Finding the appropriate slice file by quantity and height
+- Extracting grid coordinates and time points
+
+No manual fdsreader usage is required.
+
 ## Usage Example
 
 ```python
