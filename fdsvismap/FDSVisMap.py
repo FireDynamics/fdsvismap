@@ -93,8 +93,6 @@ class VisMap:
     :vartype background_image: ndarray or None # TODO: Type?
     :ivar all_time_wp_agg_vismap_list: List of waypoint-aggregated visibility maps for all time steps. Initialized as an empty list.
     :vartype all_time_wp_agg_vismap_list: list[np.ndarray]
-    :ivar time_agg_wp_agg_vismap: Time-aggregated, waypoint aggregated visibility map for all waypoints and time points. Initialized as None.
-    :vartype time_agg_wp_agg_vismap: np.ndarray or None
     :ivar num_edge_cells: Number of edge cells considered for collision detection. Initialized to 1.
     :vartype num_edge_cells: int
     """
@@ -120,8 +118,8 @@ class VisMap:
         self.max_vis: float = 30
         self.background_image: np.ndarray = np.array([])
         self.all_time_wp_agg_vismap_list: List[BoolArray] = []
-        self.time_agg_wp_agg_vismap: BoolArray = np.array([], dtype=bool)
         self.num_edge_cells: int = 1
+        self._t_max_computed: Optional[float] = None
 
         # FDS parameterPrivate - will be set later in read_fds_data()
         # ----------------------------------------------------
@@ -593,26 +591,51 @@ class VisMap:
         vismap = np.where(visibility_array_total < self.min_vis, False, vismap)
         return vismap
 
+    def _check_time_in_computed_range(self, time: float) -> None:
+        """Raise a ValueError if ``time`` exceeds the maximum time computed by :meth:`compute_all`."""
+        if self._t_max_computed is not None and time > self._t_max_computed:
+            raise ValueError(
+                f"time={time} exceeds the maximum computed time ({self._t_max_computed}). "
+                f"Re-run compute_all() with a higher t_max."
+            )
+
     def get_wp_agg_vismap(self, time: float) -> BoolArray:
         """
         Get a waypoint aggregated bool type visibility map for a specific point in time.
 
         :param time: Timestep for which to calculate the visibility map.
         :type time: float
+        :raises ValueError: If ``time`` exceeds the maximum time computed by :meth:`compute_all`.
         :return: Waypoint aggregated bool type visibility map.
         :rtype: np.ndarray
         """
+        self._check_time_in_computed_range(time)
         time_id = get_id_of_closest_value(self.vismap_time_points, time)
         return self.all_time_wp_agg_vismap_list[time_id]
 
-    def get_time_agg_wp_agg_vismap(self) -> Optional[BoolArray]:
+    def get_time_agg_wp_agg_vismap(
+        self, t_max: Optional[float] = None
+    ) -> Optional[BoolArray]:
         """
         Get a time-aggregated and waypoint-aggregated boolean visibility map.
 
+        :param t_max: The maximum time to consider. If not specified, all computed time points are used.
+                      Must not exceed the value of ``t_max`` passed to :meth:`compute_all`.
+        :type t_max: float, optional
+        :raises ValueError: If ``t_max`` exceeds the maximum time computed by :meth:`compute_all`.
         :return: Time-aggregated and waypoint-aggregated boolean visibility map.
         :rtype: np.ndarray
         """
-        return self.time_agg_wp_agg_vismap
+        if t_max is not None:
+            self._check_time_in_computed_range(t_max)
+        maps = [
+            wp_agg_vismap
+            for time, wp_agg_vismap in zip(
+                self.vismap_time_points, self.all_time_wp_agg_vismap_list
+            )
+            if t_max is None or time <= t_max
+        ]
+        return np.logical_and.reduce(maps)
 
     def get_aset_map(self, max_time: Optional[float] = None) -> IntArray:
         """
@@ -625,7 +648,9 @@ class VisMap:
         :rtype: np.ndarray
         """
         if not max_time:
-            max_time = self.vismap_time_points[-1]
+            max_time = self._t_max_computed if self._t_max_computed is not None else self.vismap_time_points[-1]
+        else:
+            self._check_time_in_computed_range(max_time)
 
         if self.fds_grid_shape is None:
             raise RuntimeError("FDS data not loaded. Call read_fds_data() first.")
@@ -635,6 +660,8 @@ class VisMap:
         for time, wp_agg_vismap in zip(
             self.vismap_time_points, self.all_time_wp_agg_vismap_list
         ):
+            if time > max_time:
+                break
             mask = ~wp_agg_vismap & (aset_map == max_time)
             aset_map[mask] = time
         return aset_map
@@ -730,7 +757,10 @@ class VisMap:
         return fig, ax
 
     def create_time_agg_wp_agg_vismap_plot(
-        self, plot_obstructions: bool = False, flip_y_axis: bool = True
+        self,
+        t_max: Optional[float] = None,
+        plot_obstructions: bool = False,
+        flip_y_axis: bool = True,
     ) -> FigureAxes:
         """
         Create a plot visualizing the time-aggregated visibility map for all waypoints.
@@ -740,6 +770,8 @@ class VisMap:
         features the trajectory of movement from the start point through all waypoints, highlighted with annotations
         for each waypoint.
 
+        :param t_max: The maximum time to consider. If not specified, all computed time points are used.
+        :type t_max: float, optional
         :param plot_obstructions: Flag indicating whether obstruction at the evaluation height should be plotted or not.
         :type plot_obstructions: bool, optional
         :param flip_y_axis: Flag indicating whether y-axis should be flipped or not to have the origin at bottom left.
@@ -754,7 +786,7 @@ class VisMap:
             "format": mticker.FixedFormatter(["not visible", "visible"]),
         }
         fig, ax = self._create_map_plot(
-            map_array=self.time_agg_wp_agg_vismap,
+            map_array=self.get_time_agg_wp_agg_vismap(t_max),
             cmap=cmap,
             plot_obstructions=plot_obstructions,
             flip_y_axis=flip_y_axis,
@@ -794,11 +826,17 @@ class VisMap:
         self.background_image = np.flip(plt.imread(file), axis=0)
 
     def compute_all(
-        self, view_angle: bool = True, obstructions: bool = True, aa: bool = True
+        self,
+        t_max: Optional[float] = None,
+        view_angle: bool = True,
+        obstructions: bool = True,
+        aa: bool = True,
     ) -> None:
         """
         Execute all required computations to generate aggregated visibility maps over all waypoints and time points.
 
+        :param t_max: The maximum simulation time to compute up to. If not specified, all available time points are computed.
+        :type t_max: float, optional
         :param view_angle: Determines if view angles should be considered in the visibility calculations,
                           affecting how visibility is computed relative to the waypoint orientations. Default is True.
         :type view_angle: bool
@@ -809,9 +847,15 @@ class VisMap:
                   smooth the appearance of the visibility boundaries but might affect computational performance. Default is True.
         :type aa: bool
         """
+        time_points = (
+            self.vismap_time_points[self.vismap_time_points <= t_max]
+            if t_max is not None
+            else self.vismap_time_points
+        )
+        self._t_max_computed = float(time_points[-1])
         self.build_help_arrays(view_angle=view_angle, obstructions=obstructions, aa=aa)
-        for time in self.vismap_time_points:
-            print(f"Simulation time {time} s of {self.vismap_time_points[-1]} s")
+        for time in time_points:
+            print(f"Simulation time {time} s of {self._t_max_computed} s")
             all_wp_vismap_array_list = []
             for waypoint_id in self.all_wp_dict.keys():
                 print(f"Waypoint {waypoint_id}", end=" ")
@@ -821,9 +865,6 @@ class VisMap:
             wp_agg_vismap = np.logical_or.reduce(all_wp_vismap_array_list)
             self.all_time_wp_agg_vismap_list.append(wp_agg_vismap)
             print("")
-        self.time_agg_wp_agg_vismap = np.logical_and.reduce(
-            self.all_time_wp_agg_vismap_list
-        )
 
     def get_local_visibility(self, time: float, x: float, y: float, c: float) -> float:
         """
@@ -895,9 +936,11 @@ class VisMap:
         :type y: float
         :param waypoint_id: The ID of the waypoint to check visibility for.
         :type waypoint_id: int
+        :raises ValueError: If ``time`` exceeds the maximum time computed by :meth:`compute_all`.
         :return: A boolean value indicating whether the specified waypoint is visible from the given location and time.
         :rtype: bool
         """
+        self._check_time_in_computed_range(time)
         time_id = get_id_of_closest_value(self.vismap_time_points, time)
         ref_x_id = get_id_of_closest_value(self.all_x_coords, x)
         ref_y_id = get_id_of_closest_value(self.all_y_coords, y)
