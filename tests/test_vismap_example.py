@@ -119,7 +119,7 @@ class TestVisibilityCalculations:
 
     def test_waypoint_visibility(self, vis_map):
         """Test waypoint visibility check."""
-        time = 500
+        time = 450
         x, y = 2, 4
         waypoint_id = 2
         # TODO: Change this function later to return bool
@@ -130,7 +130,7 @@ class TestVisibilityCalculations:
     @pytest.mark.parametrize(
         "time,x,y,waypoint_id,expected",
         [
-            (500, 2, 4, 2, False),  # From example: not visible
+            (450, 2, 4, 2, False),  # From example: not visible
             # TODO: Add more test cases as you discover expected values:
             # (100, 5, 5, 1, True),  # Example: visible case
             # (300, 10, 8, 3, False),  # Example: not visible
@@ -258,7 +258,7 @@ class TestFullExample:
         plt.close()
 
         # Test local evaluations
-        time = 500
+        time = 450
         x, y = 2, 4
         waypoint_id = 2
 

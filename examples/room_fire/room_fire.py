@@ -61,7 +61,7 @@ print("Time and waypoint aggregated Vismap saved as 'time_agg_wp_agg_vismap.pdf'
 plt.close()
 
 # Set parameters for local evaluations.
-simulation_time = 500
+simulation_time = 450
 x = 2
 y = 4
 c = 3
