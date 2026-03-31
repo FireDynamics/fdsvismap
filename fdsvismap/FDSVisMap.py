@@ -648,7 +648,11 @@ class VisMap:
         :rtype: np.ndarray
         """
         if not max_time:
-            max_time = self._t_max_computed if self._t_max_computed is not None else self.vismap_time_points[-1]
+            max_time = (
+                self._t_max_computed
+                if self._t_max_computed is not None
+                else self.vismap_time_points[-1]
+            )
         else:
             self._check_time_in_computed_range(max_time)
 
