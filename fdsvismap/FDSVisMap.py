@@ -613,9 +613,7 @@ class VisMap:
         time_id = get_id_of_closest_value(self.vismap_time_points, time)
         return self.all_time_wp_agg_vismap_list[time_id]
 
-    def get_time_agg_wp_agg_vismap(
-        self, t_max: Optional[float] = None
-    ) -> BoolArray:
+    def get_time_agg_wp_agg_vismap(self, t_max: Optional[float] = None) -> BoolArray:
         """
         Get a time-aggregated and waypoint-aggregated boolean visibility map.
 
