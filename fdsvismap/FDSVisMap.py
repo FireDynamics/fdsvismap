@@ -615,7 +615,7 @@ class VisMap:
 
     def get_time_agg_wp_agg_vismap(
         self, t_max: Optional[float] = None
-    ) -> Optional[BoolArray]:
+    ) -> BoolArray:
         """
         Get a time-aggregated and waypoint-aggregated boolean visibility map.
 
@@ -624,7 +624,7 @@ class VisMap:
         :type t_max: float, optional
         :raises ValueError: If ``t_max`` exceeds the maximum time computed by :meth:`compute_all`.
         :return: Time-aggregated and waypoint-aggregated boolean visibility map.
-        :rtype: np.ndarray
+        :rtype: BoolArray
         """
         if t_max is not None:
             self._check_time_in_computed_range(t_max)
