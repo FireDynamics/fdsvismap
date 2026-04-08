@@ -21,13 +21,18 @@ dependencies = [
     "matplotlib~=3.10,<4.0",
     "scikit-image ~= 0.23.2",
     "fdsreader ~= 1.11.5",
-    "pytest>=8.4.2",
+]
+
+[project.optional-dependencies]
+docs = [
     "sphinx >= 7.2.6",
     "sphinx-rtd-theme >= 2.0.0",
+    "sphinx-copybutton",
 ]
 
 [project.urls]
 "Homepage" = "https://firedynamics.github.io/fdsvismap/"
+"Documentation" = "https://firedynamics.github.io/fdsvismap/"
 "Repository" = "https://github.com/FireDynamics/fdsvismap"
 "Bug Tracker" = "https://github.com/FireDynamics/fdsvismap/issues"
 
@@ -36,4 +41,8 @@ dev = [
     "mypy>=1.18.2",
     "pre-commit>=4.4.0",
     "ruff>=0.14.3",
+    "pytest>=8.4.2",
+    "sphinx >= 7.2.6",
+    "sphinx-rtd-theme >= 2.0.0",
+    "sphinx-copybutton",
 ]
