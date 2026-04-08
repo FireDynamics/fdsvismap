@@ -172,8 +172,8 @@ class VisMap:
         waypoint_id: int,
         x: float,
         y: float,
-        alpha: int,  # TODO: alpha is not optional. Kristian confirm.
-        c: int = 3,
+        c: int,
+        alpha: int,
     ) -> None:
         """
         Add a waypoint along the route of egress.
@@ -185,7 +185,7 @@ class VisMap:
         :param y: y-coordinate of the waypoint referring to global FDS coordinates.
         :type y: float
         :param c: Contrast factor for exit sign according to Jin.
-        :type c: int, optional
+        :type c: int
         :param alpha: Orientation angle of the exit sign according to global FDS coordinates.
         :type alpha: int
         """
