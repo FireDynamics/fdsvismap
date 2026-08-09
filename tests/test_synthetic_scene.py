@@ -184,6 +184,16 @@ class TestViewAngleConsistency:
         distance = math.dist((x, 5.0), SIGN)
         assert (visibility >= distance) == bool(vis.wp_is_visible(0.0, x, 5.0, 0))
 
+    def test_any_query_time_is_valid_on_a_static_field(self):
+        """A uniform field is time-invariant, so t past the computed range must
+        resolve to the computed point instead of raising -- otherwise every
+        caller of the synthetic route ends up clamping times itself."""
+        vis = computed(scene(extco=0.0))
+        assert vis.wp_is_visible(1.0, 12.0, 5.0, 0)
+        assert vis.get_visibility_to_wp(3600.0, 12.0, 5.0, 0) == pytest.approx(
+            vis.get_visibility_to_wp(0.0, 12.0, 5.0, 0)
+        )
+
     def test_omnidirectional_sign_is_readable_from_both_sides(self):
         vis = computed(scene(extco=0.0, alpha=None))
         assert vis.get_visibility_to_wp(0.0, 15.0, 5.0, 0) > 0.0

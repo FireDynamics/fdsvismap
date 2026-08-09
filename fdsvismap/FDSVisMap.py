@@ -717,7 +717,16 @@ class VisMap:
         return vismap
 
     def _check_time_in_computed_range(self, time: float) -> None:
-        """Raise a ValueError if ``time`` exceeds the maximum time computed by :meth:`compute_all`."""
+        """Raise a ValueError if ``time`` exceeds the maximum time computed by :meth:`compute_all`.
+
+        A uniform field is exempt: it is identical at every time, so any query
+        resolves to the nearest computed point and rejecting late times would
+        force every caller of the synthetic route to clamp times themselves.
+        For slice-backed scenes the check stands -- there, a time past the
+        simulation would silently reuse the last frame and lie.
+        """
+        if self._uniform_extco is not None:
+            return
         if self._t_max_computed is not None and time > self._t_max_computed:
             raise ValueError(
                 f"time={time} exceeds the maximum computed time ({self._t_max_computed}). "
