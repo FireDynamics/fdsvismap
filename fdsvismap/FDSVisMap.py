@@ -235,6 +235,17 @@ class VisMap:
                 "set_grid needs at least two coordinates per axis to derive a "
                 f"cell size; got {x.size} x and {y.size} y"
             )
+        # The cell size is derived from the spacing, and the index snapping in
+        # _add_visual_object assumes it is positive and constant. A descending
+        # or non-uniform axis would not fail here -- it would silently place
+        # obstructions on the wrong cells, which is worse.
+        for name, coords in (("x", x), ("y", y)):
+            steps = np.diff(coords)
+            if steps[0] <= 0 or not np.allclose(steps, steps[0], rtol=1e-6):
+                raise ValueError(
+                    f"set_grid needs ascending, uniformly spaced {name} "
+                    f"coordinates; got steps from {steps.min()} to {steps.max()}"
+                )
         self.all_x_coords = x
         self.all_y_coords = y
         self.fds_grid_shape = (x.size, y.size)
@@ -255,7 +266,10 @@ class VisMap:
         self.fds_slc_height = slc_height
         # read_fds_data() ends by allocating this, so add_visual_obstruction()
         # is usable straight after it. Do the same here, or the first manual
-        # obstruction would index an empty array.
+        # obstruction would index an empty array. Note the shared ordering
+        # contract: build_obstructions_array() rebuilds from
+        # obstructions_collection and would erase manually added obstructions,
+        # so add walls after the grid (or the FDS read), never before a build.
         self.obstructions_array = np.zeros((y.size, x.size), dtype=bool)
 
     def set_uniform_extco(
