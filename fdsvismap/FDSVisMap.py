@@ -203,7 +203,7 @@ class VisMap:
         self._slice_frames: Dict[int, Float32Array] = {}
         # Set by set_uniform_extco() instead of read_fds_data(), for scenes
         # that have a geometry but no fire.
-        self._uniform_extco: Optional[float] = None
+        self._uniform_extco: float | None = None
         # ----------------------------------------------------
 
     def _invalidate_results(self) -> None:
@@ -339,7 +339,7 @@ class VisMap:
             waypoints=np.asarray(waypoints, dtype=float), signs=sign_ids
         )
 
-    def _grid_shape(self) -> Tuple[int, int]:
+    def _grid_shape(self) -> tuple[int, int]:
         """Return the (nx, ny) sampling grid, or explain what is missing."""
         if self.fds_grid_shape is None:
             raise RuntimeError(
@@ -404,7 +404,7 @@ class VisMap:
         self.obstructions_array = np.zeros((y.size, x.size), dtype=bool)
 
     def set_uniform_extco(
-        self, extco: float = 0.0, time_points: Optional[Sequence[float]] = None
+        self, extco: float = 0.0, time_points: Sequence[float] | None = None
     ) -> None:
         """Use one extinction coefficient everywhere instead of an FDS slice.
 
@@ -416,14 +416,19 @@ class VisMap:
         :param extco: Extinction coefficient in 1/m, applied at every cell.
         :param time_points: Times the scene is defined at. Defaults to ``[0.0]``;
             a static field is the same at every time, so one point suffices.
+            Sets the evaluation times as well, so a synthetic scene does not
+            also need :meth:`set_time_points` before :meth:`compute_all`.
         :raises ValueError: If *extco* is negative.
         """
         if extco < 0:
             raise ValueError(f"extinction coefficient must be >= 0, got {extco}")
+        # A real slice no longer applies once a synthetic field is set, or
+        # get_extco_array_at_time() would have to choose between two sources.
+        self.slc = None
         self._uniform_extco = float(extco)
-        self.fds_time_points = np.array(
-            [0.0] if time_points is None else list(time_points), dtype=float
-        )
+        points = [0.0] if time_points is None else list(time_points)
+        self.fds_time_points = np.array(points, dtype=float)
+        self.set_time_points(points)
 
     def read_fds_data(
         self,
@@ -493,6 +498,10 @@ class VisMap:
         self.obstructions_collection = sim.obstructions
         self.fds_slc_height = fds_slc_height
         self._slice_frames = {}
+        # A real slice supersedes any synthetic field, so that
+        # set_uniform_extco() followed by read_fds_data() uses the simulation
+        # rather than silently ignoring it.
+        self._uniform_extco = None
         self.build_obstructions_array()
         self._invalidate_results()
 
