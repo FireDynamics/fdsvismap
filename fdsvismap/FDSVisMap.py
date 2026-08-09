@@ -132,6 +132,9 @@ class VisMap:
         self.fds_time_points: FloatArray = np.array([], dtype=float)
         self.obstructions_collection: Sequence[Any] = []
         self.fds_slc_height: float = 2.0
+        # Set by set_uniform_extco() instead of read_fds_data(), for scenes
+        # that have a geometry but no fire.
+        self._uniform_extco: Optional[float] = None
         # ----------------------------------------------------
 
     def set_time_points(self, time_points: Sequence[float]) -> None:
@@ -190,6 +193,92 @@ class VisMap:
         :type alpha: int
         """
         self.all_wp_dict[waypoint_id] = Waypoint(x, y, c, alpha)
+
+    def _grid_shape(self) -> Tuple[int, int]:
+        """Return the (nx, ny) sampling grid, or explain what is missing."""
+        if self.fds_grid_shape is None:
+            raise RuntimeError(
+                "No sampling grid. Call read_fds_data() for an FDS scene, or "
+                "set_grid() for a scene without a fire."
+            )
+        return self.fds_grid_shape
+
+    def set_grid(
+        self,
+        x_coords: Sequence[float],
+        y_coords: Sequence[float],
+        slc_height: float = 2.0,
+    ) -> None:
+        """Define the sampling grid without reading an FDS simulation.
+
+        Visibility is a property of geometry and smoke, and only the smoke has
+        to come from FDS. A scene that has walls and signs but no fire -- a
+        clear-air evacuation model, a unit test -- still needs somewhere to
+        evaluate, and this supplies it so the ray casting, view-angle and
+        obstruction handling stay in this library rather than being
+        approximated by every caller.
+
+        Pair with :meth:`set_uniform_extco` for the extinction field and
+        :meth:`add_visual_obstruction` for the walls.
+
+        :param x_coords: Cell-centre x coordinates, ascending.
+        :param y_coords: Cell-centre y coordinates, ascending.
+        :param slc_height: Height the scene is evaluated at, in metres. Only
+            used to select obstructions by their z range.
+        :raises ValueError: If either coordinate array has fewer than two
+            entries, since a cell size cannot be derived from one.
+        """
+        x = np.asarray(x_coords, dtype=float)
+        y = np.asarray(y_coords, dtype=float)
+        if x.size < 2 or y.size < 2:
+            raise ValueError(
+                "set_grid needs at least two coordinates per axis to derive a "
+                f"cell size; got {x.size} x and {y.size} y"
+            )
+        self.all_x_coords = x
+        self.all_y_coords = y
+        self.fds_grid_shape = (x.size, y.size)
+        # extent is the outer envelope of the cells, so the cell size derived
+        # from it below matches the one read_fds_data() derives from a slice.
+        dx = float(x[1] - x[0])
+        dy = float(y[1] - y[0])
+        self.extent = np.array(
+            [
+                [float(x[0]) - dx / 2, float(x[-1]) + dx / 2],
+                [float(y[0]) - dy / 2, float(y[-1]) + dy / 2],
+            ]
+        )
+        self.cell_size = (
+            (self.extent[0, 1] - self.extent[0, 0]) / self.fds_grid_shape[0],
+            (self.extent[1, 1] - self.extent[1, 0]) / self.fds_grid_shape[1],
+        )
+        self.fds_slc_height = slc_height
+        # read_fds_data() ends by allocating this, so add_visual_obstruction()
+        # is usable straight after it. Do the same here, or the first manual
+        # obstruction would index an empty array.
+        self.obstructions_array = np.zeros((y.size, x.size), dtype=bool)
+
+    def set_uniform_extco(
+        self, extco: float = 0.0, time_points: Optional[Sequence[float]] = None
+    ) -> None:
+        """Use one extinction coefficient everywhere instead of an FDS slice.
+
+        ``extco=0`` is clear air, for which :meth:`get_visibility_to_wp`
+        returns ``max_vis`` wherever a sign is in line of sight and within the
+        readable half-plane -- the two terms that survive when there is no
+        smoke. A non-zero value models a uniformly smoke-logged scene.
+
+        :param extco: Extinction coefficient in 1/m, applied at every cell.
+        :param time_points: Times the scene is defined at. Defaults to ``[0.0]``;
+            a static field is the same at every time, so one point suffices.
+        :raises ValueError: If *extco* is negative.
+        """
+        if extco < 0:
+            raise ValueError(f"extinction coefficient must be >= 0, got {extco}")
+        self._uniform_extco = float(extco)
+        self.fds_time_points = np.array(
+            [0.0] if time_points is None else list(time_points), dtype=float
+        )
 
     def read_fds_data(
         self,
@@ -258,8 +347,19 @@ class VisMap:
         :return: Array of extinction coefficients at the specified time.
         :rtype: np.ndarray
         """
+        if self._uniform_extco is not None:
+            # Shape (nx, ny), matching the slice layout: callers index this
+            # array as [x_id, y_id] and transpose once downstream.
+            return cast(
+                ExtCoArray,
+                np.full(self._grid_shape(), self._uniform_extco, dtype=float),
+            )
+
         if self.slc is None:
-            raise RuntimeError("FDS data not loaded. Call read_fds_data() first.")
+            raise RuntimeError(
+                "No extinction data. Call read_fds_data() for an FDS scene, or "
+                "set_grid() + set_uniform_extco() for a scene without a fire."
+            )
 
         time_index = self.slc.get_nearest_timestep(time)
         extco_data = cast(ExtCoArray, self.slc.to_global()[time_index])
@@ -375,9 +475,11 @@ class VisMap:
         obstruction objects defined within the FDS simulation. It takes into account the height of the slice
         (fds_slc_height) to determine if an obstruction at a given location blocks visibility.
         """
-        # Initialize arrays for external collisions and cell obstructions
-        meshgrid = self.get_extco_array_at_time(0)
-        obstruction_array = np.zeros_like(meshgrid, dtype=bool).T
+        # Initialize arrays for external collisions and cell obstructions.
+        # Sized from the grid rather than from a slice: the obstruction map is
+        # a property of the geometry, and a scene may have no extinction data.
+        nx, ny = self._grid_shape()
+        obstruction_array = np.zeros((ny, nx), dtype=bool)
 
         # Update the obstruction_matrix based on defined obstructions and their height ranges
         for obstruction in self.obstructions_collection:
@@ -922,7 +1024,14 @@ class VisMap:
         non_concealed_cells_array = self.all_wp_non_concealed_cells_array_dict[
             waypoint_id
         ]
-        masked_visibility_array = visibility_array * non_concealed_cells_array
+        view_angle_array = self.all_wp_angle_array_dict[waypoint_id]
+        # Same product as get_vismap(): smoke, then the sign's readable
+        # half-plane, then obstructions. Without the view-angle factor this
+        # returned the full clear-air visibility to a viewer standing behind a
+        # directional sign, disagreeing with wp_is_visible() for that viewer.
+        masked_visibility_array = (
+            view_angle_array * visibility_array * non_concealed_cells_array
+        )
         visibility = float(masked_visibility_array[ref_y_id, ref_x_id])
         return visibility
 
