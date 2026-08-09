@@ -11,6 +11,7 @@ approximated by the caller.
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -91,6 +92,22 @@ class TestGridSetup:
         vis.set_uniform_extco(0.25)
         assert vis.slc is None
         assert vis.get_extco_array_at_time(0.0).max() == pytest.approx(0.25)
+
+    def test_reading_a_simulation_supersedes_a_synthetic_field(self):
+        """The other direction: a real slice wins over a uniform value.
+
+        Without this, set_uniform_extco() followed by read_fds_data() keeps
+        returning the uniform value and silently ignores the simulation that
+        was just read.
+        """
+        sim_dir = Path(__file__).parent.parent / "examples" / "room_fire" / "fds_data"
+        vis = VisMap()
+        vis.set_uniform_extco(0.5)
+        vis.read_fds_data(str(sim_dir), fds_slc_height=2)
+        assert vis._uniform_extco is None
+        # The room fire is not uniformly 0.5 anywhere by the end of the run.
+        extco = vis.get_extco_array_at_time(float(vis.fds_time_points[-1]))
+        assert extco.min() != pytest.approx(extco.max())
 
 
 class TestClearAir:
