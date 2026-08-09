@@ -64,6 +64,16 @@ class TestGridSetup:
         with pytest.raises(ValueError, match="at least two coordinates"):
             vis.set_grid([1.0], [1.0, 2.0])
 
+    def test_grid_rejects_descending_coordinates(self):
+        """A descending axis would give a negative cell size and silently
+        place obstructions on the wrong cells; refuse it instead."""
+        with pytest.raises(ValueError, match="ascending"):
+            VisMap().set_grid([10.0, 9.0, 8.0], [0.0, 1.0])
+
+    def test_grid_rejects_non_uniform_spacing(self):
+        with pytest.raises(ValueError, match="uniformly spaced"):
+            VisMap().set_grid([0.0, 1.0, 5.0, 6.0], [0.0, 1.0])
+
     def test_negative_extinction_is_rejected(self):
         with pytest.raises(ValueError, match=">= 0"):
             VisMap().set_uniform_extco(-1.0)
