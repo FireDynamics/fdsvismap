@@ -71,6 +71,27 @@ class TestGridSetup:
         with pytest.raises(RuntimeError, match="set_grid"):
             VisMap().get_extco_array_at_time(0.0)
 
+    def test_one_call_is_enough_to_set_the_evaluation_times(self):
+        """compute_all reads vismap_time_points, not fds_time_points.
+
+        Without this a caller who set only the extinction field would meet an
+        empty-time-points failure inside compute_all.
+        """
+        vis = VisMap()
+        vis.set_grid(X, Y)
+        vis.set_uniform_extco(0.0, time_points=[0.0, 10.0])
+        assert list(vis.vismap_time_points) == [0.0, 10.0]
+        vis.set_waypoint(0, *SIGN, c=3.0, alpha=None)
+        vis.compute_all(view_angle=True, obstructions=True, aa=True)
+        assert vis.get_visibility_to_wp(10.0, 12.0, 5.0, 0) > 0.0
+
+    def test_a_synthetic_field_supersedes_a_loaded_slice(self):
+        vis = scene(extco=0.5)
+        vis.slc = object()  # stand-in for a previously read simulation
+        vis.set_uniform_extco(0.25)
+        assert vis.slc is None
+        assert vis.get_extco_array_at_time(0.0).max() == pytest.approx(0.25)
+
 
 class TestClearAir:
     def test_unobstructed_sight_line_gives_max_vis(self):
