@@ -38,7 +38,7 @@ vis.add_visual_obstruction(8, 8.8, 4.6, 4.8)
 # Do the required calculations to create the Vismap.
 print("\nStarting computation...")
 start_time = time.time()
-vis.compute_all()
+vis.compute_all(progress=True)
 
 end_time = time.time()
 elapsed_time = end_time - start_time

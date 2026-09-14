@@ -22,6 +22,7 @@ dependencies = [
     "scikit-image ~= 0.23.2",
     # fdsreader 1.11.9 raises an AttributeError in Slice.get_coordinates() for cell-centered slices
     "fdsreader>=1.11.5,<1.11.9",
+    "tqdm>=4.66.3,<5.0",
 ]
 
 [project.optional-dependencies]
