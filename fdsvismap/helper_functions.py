@@ -1,5 +1,9 @@
+from typing import Iterable, TypeVar
+
 import numpy as np
 from numpy.typing import NDArray
+
+T = TypeVar("T")
 
 
 def get_id_of_closest_value(values_array: NDArray[np.floating], value: float) -> int:
@@ -54,3 +58,24 @@ def count_cells_to_obstruction(
     # Find the first occurrence of True in `hits`
     hit_indices = np.where(hits)[0]
     return hit_indices[0] if hit_indices.size > 0 else -1
+
+
+def progress_bar(iterable: Iterable[T], show: bool, description: str) -> Iterable[T]:
+    """
+    Wrap an iterable in a tqdm progress bar, shown as a widget in Jupyter notebooks.
+
+    :param iterable: The iterable to be wrapped.
+    :type iterable: Iterable
+    :param show: Flag indicating whether the progress bar is shown. If False, the iterable is returned unchanged.
+    :type show: bool
+    :param description: Description shown in front of the progress bar.
+    :type description: str
+    :return: The iterable, wrapped in a progress bar if requested.
+    :rtype: Iterable
+    """
+    if not show:
+        return iterable
+    # Imported only here, because tqdm.auto warns on import in notebooks without ipywidgets
+    from tqdm.auto import tqdm
+
+    return tqdm(iterable, desc=description)

@@ -1,5 +1,6 @@
 """Module for creating visibility maps (VisMap) based on Fire Dynamics Simulator (FDS) data."""
 
+import logging
 from typing import (
     Any,
     Dict,
@@ -28,8 +29,11 @@ from skimage.draw import line, line_aa
 from fdsvismap.helper_functions import (
     count_cells_to_obstruction,
     get_id_of_closest_value,
+    progress_bar,
 )
 from fdsvismap.Waypoint import Waypoint
+
+logger = logging.getLogger(__name__)
 
 FloatArray = NDArray[np.float64]
 Float32Array = NDArray[np.float32]
@@ -223,8 +227,10 @@ class VisMap:
         sim = fds.Simulation(sim_dir)
         if fds_slc_id:
             self.slc = sim.slices.get_by_id(fds_slc_id)
-            print(
-                f"Note: Slice with ID {fds_slc_id} was selected. Quantity is treated as SOOT EXTINCTION COEFFICIENT."
+            logger.info(
+                "Slice with ID %s was selected, its quantity is not checked and treated as %s.",
+                fds_slc_id,
+                self.quantity,
             )
         else:
             if self.quantity in [
@@ -304,6 +310,10 @@ class VisMap:
             missing_time_indices = (
                 self._get_required_time_indices() | {time_index}
             ) - self._slice_frames.keys()
+            logger.info(
+                "Reading slice data from the FDS output (missing time steps: %d).",
+                len(missing_time_indices),
+            )
             slice_data = self.slc.to_global()
             self.slc.clear_cache()
             for index in missing_time_indices:
@@ -457,7 +467,9 @@ class VisMap:
                     )
         self.obstructions_array = obstruction_array
 
-    def build_help_arrays(self, obstructions: bool, view_angle: bool, aa: bool) -> None:
+    def build_help_arrays(
+        self, obstructions: bool, view_angle: bool, aa: bool, progress: bool = False
+    ) -> None:
         """
         Construct auxiliary arrays used for the comprehensive creation of visibility maps.
 
@@ -469,8 +481,13 @@ class VisMap:
         :type view_angle: bool
         :param aa: Flag indicating whether antialiasing should be used in the calculation of line-of-sight paths, affecting the smoothness of boundaries.
         :type aa: bool, optional
+        :param progress: Flag indicating whether a progress bar over the waypoints is shown. Default is False.
+        :type progress: bool, optional
         """
-        for waypoint_id in self.all_wp_dict.keys():
+        for waypoint_id in progress_bar(
+            self.all_wp_dict.keys(), progress, "Preparing waypoints"
+        ):
+            logger.debug("Preparing waypoint %s", waypoint_id)
             if obstructions:
                 non_concealed_cells_array = self._get_non_concealed_cells_array(
                     waypoint_id, aa
@@ -904,9 +921,13 @@ class VisMap:
         view_angle: bool = True,
         obstructions: bool = True,
         aa: bool = True,
+        progress: bool = False,
     ) -> None:
         """
         Execute all required computations to generate aggregated visibility maps over all waypoints and time points.
+
+        Messages about the progress are sent to the logger ``fdsvismap.FDSVisMap`` (level INFO per time point, DEBUG per
+        waypoint), e.g. shown by ``logging.basicConfig(level=logging.INFO)``.
 
         :param t_max: The maximum simulation time to compute up to. If not specified, all available time points are computed.
         :type t_max: float, optional
@@ -919,6 +940,9 @@ class VisMap:
         :param aa: Determines if antialiasing should be applied when computing visibility lines, which can
                   smooth the appearance of the visibility boundaries but might affect computational performance. Default is True.
         :type aa: bool
+        :param progress: Determines if progress bars are shown while the waypoints are prepared and the vismaps are
+                         computed. Default is False.
+        :type progress: bool
         """
         time_points = (
             self.vismap_time_points[self.vismap_time_points <= t_max]
@@ -926,18 +950,19 @@ class VisMap:
             else self.vismap_time_points
         )
         self._t_max_computed = float(time_points[-1])
-        self.build_help_arrays(view_angle=view_angle, obstructions=obstructions, aa=aa)
-        for time in time_points:
-            print(f"Simulation time {time} s of {self._t_max_computed} s")
+        self.build_help_arrays(
+            view_angle=view_angle, obstructions=obstructions, aa=aa, progress=progress
+        )
+        for time in progress_bar(time_points, progress, "Computing vismaps"):
+            logger.info("Simulation time %s s of %s s", time, self._t_max_computed)
             all_wp_vismap_array_list = []
             for waypoint_id in self.all_wp_dict.keys():
-                print(f"Waypoint {waypoint_id}", end=" ")
+                logger.debug("Waypoint %s at simulation time %s s", waypoint_id, time)
                 vismap = self.get_vismap(waypoint_id, time)
                 all_wp_vismap_array_list.append(vismap)
             self.all_time_all_wp_vismap_array_list.append(all_wp_vismap_array_list)
             wp_agg_vismap = np.logical_or.reduce(all_wp_vismap_array_list)
             self.all_time_wp_agg_vismap_list.append(wp_agg_vismap)
-            print("")
 
     def get_local_visibility(self, time: float, x: float, y: float, c: float) -> float:
         """
