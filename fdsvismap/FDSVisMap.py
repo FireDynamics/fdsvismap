@@ -7,6 +7,7 @@ from typing import (
     Literal,
     Optional,
     Sequence,
+    Set,
     Tuple,
     TypedDict,
     Union,
@@ -31,15 +32,19 @@ from fdsvismap.helper_functions import (
 from fdsvismap.Waypoint import Waypoint
 
 FloatArray = NDArray[np.float64]
+Float32Array = NDArray[np.float32]
 BoolArray = NDArray[np.bool_]
 IntArray = NDArray[np.intp]  # platform-index-sized int
+Int32Array = NDArray[np.int32]
 ExtCoArray = FloatArray  # extinction coefficient is float
 FigureAxes = Tuple[Figure, Axes]
 
 
 class RayCastingCache(TypedDict):
-    ray_paths_x: list[IntArray]
-    ray_paths_y: list[IntArray]
+    # Flat (nx, ny) indices of the cells along all rays, concatenated
+    ray_cells_flat_idx: Int32Array
+    # Position of the first cell of each ray in ray_cells_flat_idx
+    ray_start_idx: IntArray
     ray_cell_counts: IntArray
     non_concealed_x_idx: IntArray
     non_concealed_y_idx: IntArray
@@ -81,7 +86,7 @@ class VisMap:
     :vartype all_time_all_wp_vismap_array_list: list[list[np.ndarray]]
     :ivar all_wp_non_concealed_cells_xy_idx_dict: Dictionary of indices of non-concealed cells for each waypoint. Initialized as an empty list.
     :vartype all_wp_non_concealed_cells_xy_idx_dict: dict[tuple[np.ndarray, np.ndarray]]
-    :ivar all_wp_ray_casting_cache_dict: Dictionary storing pre-computed ray casting data (line indices and cell counts) for each waypoint. Initialized as an empty dict.
+    :ivar all_wp_ray_casting_cache_dict: Dictionary storing pre-computed ray casting data (flat indices of the cells along all rays, start index and cell count of each ray) for each waypoint. Initialized as an empty dict.
     :vartype all_wp_ray_casting_cache_dict: dict[int, RayCastingCache]
     :ivar min_vis: Minimum local visibility threshold to meet performance criteria. Initialized to 0.
     :vartype min_vis: float
@@ -132,16 +137,21 @@ class VisMap:
         self.fds_time_points: FloatArray = np.array([], dtype=float)
         self.obstructions_collection: Sequence[Any] = []
         self.fds_slc_height: float = 2.0
+        # Slice data per FDS time step index, loaded on first access
+        self._slice_frames: Dict[int, Float32Array] = {}
         # ----------------------------------------------------
 
     def set_time_points(self, time_points: Sequence[float]) -> None:
         """
         Set the times on which the simulation should be evaluated.
 
+        Only the slice data of the FDS time steps closest to these time points is kept in memory.
+
         :param time_points: List of time points in the simulation.
         :type time_points: list
         """
         self.vismap_time_points = np.array(time_points)
+        self._release_slice_frames()
 
     def set_visibility_bounds(self, min_vis: float, max_vis: float) -> None:
         """
@@ -201,6 +211,7 @@ class VisMap:
         Read FDS data and store relevant coordinates, shape of the meshgrid, slices and obstructions.
 
         If defined, the relevant slice file is read by ID, otherwise by quantity and closest to given height.
+        The slice data itself is read on first access, see :meth:`get_extco_array_at_time`.
 
         :param sim_dir: Directory where FDS simulation data is stored
         :type sim_dir: object
@@ -247,11 +258,65 @@ class VisMap:
         self.fds_time_points = self.slc.times
         self.obstructions_collection = sim.obstructions
         self.fds_slc_height = fds_slc_height
+        self._slice_frames = {}
         self.build_obstructions_array()
+
+    def _get_required_time_indices(self) -> Set[int]:
+        """
+        Get the indices of the FDS time steps closest to the time points set by :meth:`set_time_points`.
+
+        :return: Indices of the FDS time steps.
+        :rtype: set[int]
+        """
+        if self.slc is None:
+            return set()
+        return {
+            int(self.slc.get_nearest_timestep(time)) for time in self.vismap_time_points
+        }
+
+    def _release_slice_frames(self) -> None:
+        """Remove the slice data of all FDS time steps that are not required for the time points from memory."""
+        required_time_indices = self._get_required_time_indices()
+        self._slice_frames = {
+            time_index: frame
+            for time_index, frame in self._slice_frames.items()
+            if time_index in required_time_indices
+        }
+
+    def _get_slice_frame(self, time_index: int) -> Float32Array:
+        """
+        Get the slice data of an FDS time step and read it from the FDS output if it is not in memory.
+
+        fdsreader can only assemble the slice for all time steps at once (as float64) and keeps the data of all meshes
+        in its cache afterwards. Therefore, all missing time steps required for the time points are read in one go
+        together with the requested one and stored as float32, then the fdsreader cache is cleared. Time steps read
+        before that are not required for the time points are removed from memory.
+
+        :param time_index: Index of the FDS time step.
+        :type time_index: int
+        :return: Slice data at the FDS time step, shape (nx, ny).
+        :rtype: np.ndarray
+        """
+        if time_index not in self._slice_frames:
+            if self.slc is None:
+                raise RuntimeError("FDS data not loaded. Call read_fds_data() first.")
+            self._release_slice_frames()
+            missing_time_indices = (
+                self._get_required_time_indices() | {time_index}
+            ) - self._slice_frames.keys()
+            slice_data = self.slc.to_global()
+            self.slc.clear_cache()
+            for index in missing_time_indices:
+                self._slice_frames[index] = slice_data[index].astype(np.float32)
+        return self._slice_frames[time_index]
 
     def get_extco_array_at_time(self, time: float) -> ExtCoArray:
         """
         Get the array of extinction coefficients from the relevant slice file closest to the given time.
+
+        The slice data of the FDS time steps closest to the time points (see :meth:`set_time_points`) is read once and
+        kept in memory. Other time steps are read from the FDS output on request, which takes longer for large
+        simulations.
 
         :param time: Time point to be evaluated in seconds.
         :type time: float
@@ -261,8 +326,8 @@ class VisMap:
         if self.slc is None:
             raise RuntimeError("FDS data not loaded. Call read_fds_data() first.")
 
-        time_index = self.slc.get_nearest_timestep(time)
-        extco_data = cast(ExtCoArray, self.slc.to_global()[time_index])
+        time_index = int(self.slc.get_nearest_timestep(time))
+        extco_data = self._get_slice_frame(time_index).astype(np.float64)
         if self.quantity in [
             "OD_C",
             "OD_C0.9H0.1",
@@ -307,18 +372,13 @@ class VisMap:
         mean_extco_array = np.zeros_like(extco_array)
 
         cache = self.all_wp_ray_casting_cache_dict[waypoint_id]
-        ray_paths_x = cache["ray_paths_x"]
-        ray_paths_y = cache["ray_paths_y"]
-        ray_cell_counts = cache["ray_cell_counts"]
-        non_concealed_x_idx = cache["non_concealed_x_idx"]
-        non_concealed_y_idx = cache["non_concealed_y_idx"]
-
-        for i, (x_id, y_id) in enumerate(zip(non_concealed_x_idx, non_concealed_y_idx)):
-            x_lp_idx = ray_paths_x[i]
-            y_lp_idx = ray_paths_y[i]
-            n_cells = ray_cell_counts[i]
-            mean_extco = np.sum(extco_array[x_lp_idx, y_lp_idx]) / n_cells
-            mean_extco_array[x_id, y_id] = mean_extco
+        # Sum up the extinction coefficients along all rays at once, each ray is a segment of the flat index array
+        ray_extco_sums = np.add.reduceat(
+            extco_array.ravel()[cache["ray_cells_flat_idx"]], cache["ray_start_idx"]
+        )
+        mean_extco_array[cache["non_concealed_x_idx"], cache["non_concealed_y_idx"]] = (
+            ray_extco_sums / cache["ray_cell_counts"]
+        )
         return mean_extco_array.T
 
     def _get_dist_array(self, waypoint_id: int) -> FloatArray:
@@ -375,9 +435,12 @@ class VisMap:
         obstruction objects defined within the FDS simulation. It takes into account the height of the slice
         (fds_slc_height) to determine if an obstruction at a given location blocks visibility.
         """
+        if self.fds_grid_shape is None:
+            raise RuntimeError("FDS data not loaded. Call read_fds_data() first.")
         # Initialize arrays for external collisions and cell obstructions
-        meshgrid = self.get_extco_array_at_time(0)
-        obstruction_array = np.zeros_like(meshgrid, dtype=bool).T
+        obstruction_array: BoolArray = np.zeros(
+            (self.fds_grid_shape[1], self.fds_grid_shape[0]), dtype=bool
+        )
 
         # Update the obstruction_matrix based on defined obstructions and their height ranges
         for obstruction in self.obstructions_collection:
@@ -440,8 +503,9 @@ class VisMap:
         """
         Pre-compute and cache ray casting data for a waypoint.
 
-        Stores the line indices and cell counts for all non-concealed cells relative to a waypoint.
-        This avoids recalculating ray paths at every timestep.
+        Stores the cells along the rays to all non-concealed cells relative to a waypoint as flat indices of the
+        (nx, ny) extinction coefficient array in one int32 array, together with the start index and cell count of
+        each ray. This avoids recalculating ray paths at every timestep.
 
         :param waypoint_id: The index of the waypoint for which to build the cache.
         :type waypoint_id: int
@@ -449,25 +513,28 @@ class VisMap:
         wp = self.all_wp_dict[waypoint_id]
         ref_x_id = get_id_of_closest_value(self.all_x_coords, wp.x)
         ref_y_id = get_id_of_closest_value(self.all_y_coords, wp.y)
+        n_y = len(self.all_y_coords)
 
         non_concealed_x_idx, non_concealed_y_idx = self._get_non_concealed_cells_idx(
             waypoint_id
         )
 
-        ray_paths_x: List[IntArray] = []
-        ray_paths_y: List[IntArray] = []
-        ray_cell_counts: List[int] = []
-
+        ray_paths: List[Int32Array] = []
         for x_id, y_id in zip(non_concealed_x_idx, non_concealed_y_idx):
             x_lp_idx, y_lp_idx = line(ref_x_id, ref_y_id, x_id, y_id)
-            ray_paths_x.append(x_lp_idx)
-            ray_paths_y.append(y_lp_idx)
-            ray_cell_counts.append(len(x_lp_idx))
+            ray_paths.append((x_lp_idx * n_y + y_lp_idx).astype(np.int32))
+
+        ray_cells_flat_idx = (
+            np.concatenate(ray_paths) if ray_paths else np.array([], dtype=np.int32)
+        )
+        ray_cell_counts = np.array([len(ray) for ray in ray_paths], dtype=np.intp)
+        ray_start_idx = np.zeros_like(ray_cell_counts)
+        ray_start_idx[1:] = np.cumsum(ray_cell_counts)[:-1]
 
         self.all_wp_ray_casting_cache_dict[waypoint_id] = {
-            "ray_paths_x": ray_paths_x,
-            "ray_paths_y": ray_paths_y,
-            "ray_cell_counts": np.array(ray_cell_counts, dtype=np.intp),
+            "ray_cells_flat_idx": ray_cells_flat_idx,
+            "ray_start_idx": ray_start_idx,
+            "ray_cell_counts": ray_cell_counts,
             "non_concealed_x_idx": non_concealed_x_idx,
             "non_concealed_y_idx": non_concealed_y_idx,
         }
@@ -582,7 +649,7 @@ class VisMap:
         ]
         view_angle_array = self.all_wp_angle_array_dict[waypoint_id]
         visibility_array = self._get_visibility_array(waypoint_id, time)
-        distance_array = self._get_dist_array(waypoint_id)
+        distance_array = self.all_wp_distance_array_dict[waypoint_id]
 
         visibility_array_total = (
             view_angle_array * visibility_array * non_concealed_cells_array
@@ -825,7 +892,11 @@ class VisMap:
         :param file: Path to the image file that will be used as the background.
         :type file: str
         """
-        self.background_image = np.flip(plt.imread(file), axis=0)
+        image = plt.imread(file)
+        # PNG files are read as float32 in [0, 1], uint8 needs a quarter of the memory
+        if np.issubdtype(image.dtype, np.floating):
+            image = np.round(image * 255).astype(np.uint8)
+        self.background_image = np.flip(image, axis=0)
 
     def compute_all(
         self,
