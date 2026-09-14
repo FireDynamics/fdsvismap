@@ -926,8 +926,9 @@ class VisMap:
         """
         Execute all required computations to generate aggregated visibility maps over all waypoints and time points.
 
-        Messages about the progress are sent to the logger ``fdsvismap.FDSVisMap`` (level INFO per time point, DEBUG per
-        waypoint), e.g. shown by ``logging.basicConfig(level=logging.INFO)``.
+        The results of previous calls are replaced. Messages about the progress are sent to the logger
+        ``fdsvismap.FDSVisMap`` (level INFO per time point, DEBUG per waypoint), e.g. shown by
+        ``logging.basicConfig(level=logging.INFO)``.
 
         :param t_max: The maximum simulation time to compute up to. If not specified, all available time points are computed.
         :type t_max: float, optional
@@ -950,6 +951,8 @@ class VisMap:
             else self.vismap_time_points
         )
         self._t_max_computed = float(time_points[-1])
+        self.all_time_all_wp_vismap_array_list = []
+        self.all_time_wp_agg_vismap_list = []
         self.build_help_arrays(
             view_angle=view_angle, obstructions=obstructions, aa=aa, progress=progress
         )
