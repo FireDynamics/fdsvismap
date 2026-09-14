@@ -34,6 +34,13 @@ exclude = [
 line-length = 88
 indent-width = 4
 
+# Ruff 0.16 enables many more rules by default and also formats code blocks in Markdown
+# files. Keep the previous defaults, so that all ruff versions check the same.
+include = ["*.py", "*.pyi", "*.ipynb", "**/pyproject.toml"]
+
+[lint]
+select = ["E4", "E7", "E9", "F"]
+
 [format]
 # Like Black, use double quotes for strings.
 quote-style = "double"
