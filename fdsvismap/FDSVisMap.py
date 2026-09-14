@@ -1104,10 +1104,10 @@ class VisMap:
         )
 
         ref_y1_id = get_id_of_closest_value(
-            self.all_y_coords, y1 + self.cell_size[0] / 2
+            self.all_y_coords, y1 + self.cell_size[1] / 2
         )
         ref_y2_id = (
-            get_id_of_closest_value(self.all_y_coords, y2 - self.cell_size[0] / 2) + 1
+            get_id_of_closest_value(self.all_y_coords, y2 - self.cell_size[1] / 2) + 1
         )
 
         obstructions_array[ref_y1_id:ref_y2_id, ref_x1_id:ref_x2_id] = status
