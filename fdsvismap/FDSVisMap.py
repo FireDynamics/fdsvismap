@@ -779,20 +779,15 @@ class VisMap:
 
         """
         origin: Literal["upper", "lower"] = "lower" if flip_y_axis else "upper"
+        # The image edges lie half a cell outside the outermost cell centres, so that each pixel covers its cell
+        x_min = float(self.all_x_coords[0] - self.cell_size[0] / 2)
+        x_max = float(self.all_x_coords[-1] + self.cell_size[0] / 2)
+        y_min = float(self.all_y_coords[0] - self.cell_size[1] / 2)
+        y_max = float(self.all_y_coords[-1] + self.cell_size[1] / 2)
         if flip_y_axis:
-            extent = (
-                self.all_x_coords[0],
-                self.all_x_coords[-1],
-                self.all_y_coords[0],
-                self.all_y_coords[-1],
-            )
+            extent = (x_min, x_max, y_min, y_max)
         else:
-            extent = (
-                self.all_x_coords[0],
-                self.all_x_coords[-1],
-                self.all_y_coords[-1],
-                self.all_y_coords[0],
-            )
+            extent = (x_min, x_max, y_max, y_min)
         fig, ax = plt.subplots()
         if self.background_image is not None:
             ax.imshow(self.background_image, extent=extent, origin=origin)
