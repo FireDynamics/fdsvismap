@@ -12,6 +12,7 @@ from fdsvismap.helper_functions import get_id_of_closest_value
 
 FloatArray = NDArray[np.float64]
 IntArray = NDArray[np.intp]
+Int32Array = NDArray[np.int32]
 
 
 def old_ray_casting(
@@ -34,19 +35,19 @@ def old_ray_casting(
 
 def new_ray_casting(
     extco_array: FloatArray,
-    ray_paths_x: list[IntArray],
-    ray_paths_y: list[IntArray],
+    ray_cells_flat_idx: Int32Array,
+    ray_start_idx: IntArray,
     ray_cell_counts: IntArray,
     non_concealed_x_idx: IntArray,
     non_concealed_y_idx: IntArray,
 ) -> FloatArray:
     mean_extco_array = np.zeros_like(extco_array)
-    for i, (x_id, y_id) in enumerate(zip(non_concealed_x_idx, non_concealed_y_idx)):
-        x_lp_idx = ray_paths_x[i]
-        y_lp_idx = ray_paths_y[i]
-        n_cells = ray_cell_counts[i]
-        mean_extco = np.sum(extco_array[x_lp_idx, y_lp_idx]) / n_cells
-        mean_extco_array[x_id, y_id] = mean_extco
+    ray_extco_sums = np.add.reduceat(
+        extco_array.ravel()[ray_cells_flat_idx], ray_start_idx
+    )
+    mean_extco_array[non_concealed_x_idx, non_concealed_y_idx] = (
+        ray_extco_sums / ray_cell_counts
+    )
     return mean_extco_array
 
 
@@ -76,8 +77,8 @@ def benchmark() -> None:
         ref_y_id = get_id_of_closest_value(vis.all_y_coords, wp.y)
 
         cache = vis.all_wp_ray_casting_cache_dict[waypoint_id]
-        ray_paths_x = cache["ray_paths_x"]
-        ray_paths_y = cache["ray_paths_y"]
+        ray_cells_flat_idx = cache["ray_cells_flat_idx"]
+        ray_start_idx = cache["ray_start_idx"]
         ray_cell_counts = cache["ray_cell_counts"]
         non_concealed_x_idx = cache["non_concealed_x_idx"]
         non_concealed_y_idx = cache["non_concealed_y_idx"]
@@ -92,8 +93,8 @@ def benchmark() -> None:
         )
         new_result = new_ray_casting(
             extco_array,
-            ray_paths_x,
-            ray_paths_y,
+            ray_cells_flat_idx,
+            ray_start_idx,
             ray_cell_counts,
             non_concealed_x_idx,
             non_concealed_y_idx,
@@ -122,8 +123,8 @@ def benchmark() -> None:
             extco_array = vis.get_extco_array_at_time(t)
             new_ray_casting(
                 extco_array,
-                ray_paths_x,
-                ray_paths_y,
+                ray_cells_flat_idx,
+                ray_start_idx,
                 ray_cell_counts,
                 non_concealed_x_idx,
                 non_concealed_y_idx,
