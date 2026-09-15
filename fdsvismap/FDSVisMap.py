@@ -818,7 +818,8 @@ class VisMap:
         else:
             extent = (x_min, x_max, y_max, y_min)
         fig, ax = plt.subplots()
-        if self.background_image is not None:
+        # Without add_background_image() the background image is an empty array
+        if self.background_image is not None and self.background_image.size:
             ax.imshow(self.background_image, extent=extent, origin=origin)
         if plot_obstructions:
             ax.imshow(
