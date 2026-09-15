@@ -4,6 +4,7 @@ import logging
 from typing import (
     Any,
     Dict,
+    Iterable,
     List,
     Literal,
     Optional,
@@ -223,15 +224,12 @@ class VisMap:
         :type fds_slc_id: str
         :param fds_slc_height: The height at which to evaluate visibility. Default is 2.
         :type fds_slc_height: float, optional
+        :raises ValueError: If no matching slice is found. The message lists the available slices.
         """
         sim = fds.Simulation(sim_dir)
         if fds_slc_id:
             self.slc = sim.slices.get_by_id(fds_slc_id)
-            logger.info(
-                "Slice with ID %s was selected, its quantity is not checked and treated as %s.",
-                fds_slc_id,
-                self.quantity,
-            )
+            searched_slice = f"with ID {fds_slc_id!r}"
         else:
             if self.quantity in [
                 "ext_coef_C",
@@ -239,20 +237,31 @@ class VisMap:
                 "SOOT EXTINCTION COEFFICIENT",
                 "EXTINCTION COEFFICIENT",
             ]:
-                self.slc = sim.slices.filter_by_quantity(
-                    "SOOT EXTINCTION COEFFICIENT"
-                ).get_nearest(0, 0, fds_slc_height)
+                fds_quantity = "SOOT EXTINCTION COEFFICIENT"
             elif self.quantity in [
                 "OD_C",
                 "OD_C0.9H0.1",
                 "SOOT OPTICAL DENSITY",
                 "OPTICAL DENSITY",
             ]:
-                self.slc = sim.slices.filter_by_quantity(
-                    "SOOT OPTICAL DENSITY"
-                ).get_nearest(0, 0, fds_slc_height)
+                fds_quantity = "SOOT OPTICAL DENSITY"
             else:
                 raise ValueError(f"Unsupported quantity: {self.quantity}")
+            self.slc = sim.slices.filter_by_quantity(fds_quantity).get_nearest(
+                0, 0, fds_slc_height
+            )
+            searched_slice = f"with quantity {fds_quantity!r}"
+        if self.slc is None:
+            raise ValueError(
+                f"No slice {searched_slice} found in {sim_dir}. Select one of the available slices "
+                f"with fds_slc_id:\n{self._describe_slices(sim.slices)}"
+            )
+        if fds_slc_id:
+            logger.info(
+                "Slice with ID %s was selected, its quantity is not checked and treated as %s.",
+                fds_slc_id,
+                self.quantity,
+            )
         self.extent = np.array(self.slc.extent._extents)
         self.all_x_coords = self.slc.get_coordinates()["x"]
         self.all_y_coords = self.slc.get_coordinates()["y"]
@@ -266,6 +275,26 @@ class VisMap:
         self.fds_slc_height = fds_slc_height
         self._slice_frames = {}
         self.build_obstructions_array()
+
+    @staticmethod
+    def _describe_slices(slices: Iterable[Any]) -> str:
+        """
+        Describe FDS slices by ID, quantity and position, one slice per line.
+
+        :param slices: Slices of an FDS simulation.
+        :type slices: fdsreader.slcf.SliceCollection
+        :return: Description of the slices.
+        :rtype: str
+        """
+        lines = []
+        for slc in slices:
+            if slc.orientation == 0:
+                position = "3D"
+            else:
+                axis = ("x", "y", "z")[slc.orientation - 1]
+                position = f"{axis} = {slc.extent[axis][0]:.2f} m"
+            lines.append(f"  {slc.id or '(no ID)'}: {slc.quantity.name}, {position}")
+        return "\n".join(lines) if lines else "  (none)"
 
     def _get_required_time_indices(self) -> Set[int]:
         """
@@ -415,6 +444,7 @@ class VisMap:
         :param waypoint_id: The index of the waypoint for which view angles are to be calculated.
         :type waypoint_id: int
         :return: A 2D numpy array with the cosine values of the view angles from the waypoint to each cell.
+                 A cell at the position of the waypoint itself (distance 0) gets the value 1.
         :rtype: np.ndarray
         """
         distance_array = self._get_dist_array(waypoint_id)
@@ -424,11 +454,13 @@ class VisMap:
             view_angle_array = cast(
                 FloatArray,
                 np.clip(
-                    (
+                    np.divide(
                         np.sin(np.deg2rad(wp.alpha)) * (self.xv - wp.x)
-                        + np.cos(np.deg2rad(wp.alpha)) * (self.yv - wp.y)
-                    )
-                    / distance_array,
+                        + np.cos(np.deg2rad(wp.alpha)) * (self.yv - wp.y),
+                        distance_array,
+                        out=np.ones_like(distance_array, dtype=np.float64),
+                        where=distance_array > 0,
+                    ),
                     0,
                     1,
                 ),
@@ -723,13 +755,13 @@ class VisMap:
         """
         Generate a map indicating the earliest time at which each point becomes non-visible.
 
-        :param max_time: The maximum time to consider. If not specified, the last time in `self.times` is used.
-        :type max_time: int, optional
+        :param max_time: The maximum time to consider. If None, the maximum time computed by :meth:`compute_all` is used.
+        :type max_time: float, optional
         :return: A 2D array where each cell represents the earliest time of non-visibility
         for the corresponding point. Cells for points that never become non-visible are set to `max_time`.
         :rtype: np.ndarray
         """
-        if not max_time:
+        if max_time is None:
             max_time = (
                 self._t_max_computed
                 if self._t_max_computed is not None
@@ -779,22 +811,18 @@ class VisMap:
 
         """
         origin: Literal["upper", "lower"] = "lower" if flip_y_axis else "upper"
+        # The image edges lie half a cell outside the outermost cell centres, so that each pixel covers its cell
+        x_min = float(self.all_x_coords[0] - self.cell_size[0] / 2)
+        x_max = float(self.all_x_coords[-1] + self.cell_size[0] / 2)
+        y_min = float(self.all_y_coords[0] - self.cell_size[1] / 2)
+        y_max = float(self.all_y_coords[-1] + self.cell_size[1] / 2)
         if flip_y_axis:
-            extent = (
-                self.all_x_coords[0],
-                self.all_x_coords[-1],
-                self.all_y_coords[0],
-                self.all_y_coords[-1],
-            )
+            extent = (x_min, x_max, y_min, y_max)
         else:
-            extent = (
-                self.all_x_coords[0],
-                self.all_x_coords[-1],
-                self.all_y_coords[-1],
-                self.all_y_coords[0],
-            )
+            extent = (x_min, x_max, y_max, y_min)
         fig, ax = plt.subplots()
-        if self.background_image is not None:
+        # Without add_background_image() the background image is an empty array
+        if self.background_image is not None and self.background_image.size:
             ax.imshow(self.background_image, extent=extent, origin=origin)
         if plot_obstructions:
             ax.imshow(
@@ -926,8 +954,9 @@ class VisMap:
         """
         Execute all required computations to generate aggregated visibility maps over all waypoints and time points.
 
-        Messages about the progress are sent to the logger ``fdsvismap.FDSVisMap`` (level INFO per time point, DEBUG per
-        waypoint), e.g. shown by ``logging.basicConfig(level=logging.INFO)``.
+        The results of previous calls are replaced. Messages about the progress are sent to the logger
+        ``fdsvismap.FDSVisMap`` (level INFO per time point, DEBUG per waypoint), e.g. shown by
+        ``logging.basicConfig(level=logging.INFO)``.
 
         :param t_max: The maximum simulation time to compute up to. If not specified, all available time points are computed.
         :type t_max: float, optional
@@ -950,6 +979,8 @@ class VisMap:
             else self.vismap_time_points
         )
         self._t_max_computed = float(time_points[-1])
+        self.all_time_all_wp_vismap_array_list = []
+        self.all_time_wp_agg_vismap_list = []
         self.build_help_arrays(
             view_angle=view_angle, obstructions=obstructions, aa=aa, progress=progress
         )
@@ -1101,10 +1132,10 @@ class VisMap:
         )
 
         ref_y1_id = get_id_of_closest_value(
-            self.all_y_coords, y1 + self.cell_size[0] / 2
+            self.all_y_coords, y1 + self.cell_size[1] / 2
         )
         ref_y2_id = (
-            get_id_of_closest_value(self.all_y_coords, y2 - self.cell_size[0] / 2) + 1
+            get_id_of_closest_value(self.all_y_coords, y2 - self.cell_size[1] / 2) + 1
         )
 
         obstructions_array[ref_y1_id:ref_y2_id, ref_x1_id:ref_x2_id] = status

@@ -28,3 +28,30 @@ jobs:
 
       - name: Run tests with pytest
         run: uv run pytest -v --maxfail=1 --disable-warnings
+
+  # Same tests on Windows and macOS, to make sure fdsvismap works independently of the operating system
+  test-os:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Sync dependencies
+        run: uv sync --all-extras --dev
+
+      - name: Run tests with pytest
+        run: uv run pytest -v --maxfail=1 --disable-warnings
