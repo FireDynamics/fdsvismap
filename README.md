@@ -23,22 +23,23 @@ pip install fdsvismap
 ### Installation with uv
 
 ```bash
-# Install dependencies
+# Install fdsvismap in editable mode with its dependencies and the dev dependency group
 uv sync
 
-# Install in editable mode with dev dependencies
-uv sunc --extra dev
+# Additionally install the dependencies for building the documentation
+uv sync --extra docs
 ```
 
 ### Running Tests Locally
 
-To run code quality checks, you can use the following command locally:
+To run all quality checks (linting, formatting, type checking) as well as the tests, use the following commands:
 
 ```bash
-# Run all quality checks (linting, formatting, type checking)
-# as well as the tests.
-./scripts/ci.sh
+uv run pre-commit run --all-files
+uv run pytest
 ```
+
+On Linux and macOS, or with Git Bash on Windows, `./scripts/ci.sh` runs both steps at once.
 
 ## Citation 
 
@@ -67,33 +68,36 @@ FDSVisMap requires specific slice file data from your FDS simulation. The tool u
 Add the following to your FDS input file (`.fds`):
 
 ```fds
-&SLCF QUANTITY='SOOT EXTINCTION COEFFICIENT', PBZ=2.0, /
+&SLCF QUANTITY='EXTINCTION COEFFICIENT', CELL_CENTERED=T, PBZ=2.0 /
 ```
 
 Or for optical density:
 
 ```fds
-&SLCF QUANTITY='SOOT OPTICAL DENSITY', PBZ=2.0, /
+&SLCF QUANTITY='OPTICAL DENSITY', CELL_CENTERED=T, PBZ=2.0 /
 ```
 
 - `PBZ=2.0` sets the z-coordinate (position) of the slice plane (adjust as needed).
 - The slice plane height (z-coordinate, corresponding to `PBZ` in FDS) is selected in Python via `fds_slc_height`.
+- `CELL_CENTERED=T` writes the values at the cell centres, as in the examples of this repository.
+- In the FDS output, these quantities are named `SOOT EXTINCTION COEFFICIENT` and `SOOT OPTICAL DENSITY`. FDS does not accept these names in the input file.
+- If smoke is defined as a separate species (`SPEC_ID`), the quantity is named after the species, e.g. `MY SMOKE EXTINCTION COEFFICIENT`. Select such a slice by its ID with `fds_slc_id`.
 
 ### Supported Quantities
 
-| Python `quantity` value | FDS Quantity |
+| Python `quantity` value | Quantity in the FDS output |
 |------------------------|--------------|
-| `ext_coef_C` (default) | `SOOT EXTINCTION COEFFICIENT` |
-| `ext_coef_C0.9H0.1` | `SOOT EXTINCTION COEFFICIENT` |
+| `ext_coef_C0.9H0.1` (default) | `SOOT EXTINCTION COEFFICIENT` |
+| `ext_coef_C` | `SOOT EXTINCTION COEFFICIENT` |
 | `OD_C` | `SOOT OPTICAL DENSITY` |
 | `OD_C0.9H0.1` | `SOOT OPTICAL DENSITY` |
 
-You can set `vis.quantity` either to these Python-side names (recommended) or to the corresponding FDS `QUANTITY` strings (for example, `'SOOT EXTINCTION COEFFICIENT'` or `'SOOT OPTICAL DENSITY'`); both forms are accepted as aliases.
+You can set `vis.quantity` either to these Python-side names (recommended) or to the FDS quantity names (for example, `'EXTINCTION COEFFICIENT'`, `'SOOT EXTINCTION COEFFICIENT'`, `'OPTICAL DENSITY'` or `'SOOT OPTICAL DENSITY'`); all of them are accepted as aliases.
 
 ```python
 vis = VisMap()
 
-# Default: uses 'SOOT EXTINCTION COEFFICIENT' (Python-side name: "ext_coef_C")
+# Default: uses 'SOOT EXTINCTION COEFFICIENT' (Python-side name: "ext_coef_C0.9H0.1")
 vis.read_fds_data(sim_dir, fds_slc_height=2.0)
 
 # Or explicitly set the quantity using the Python-side name
@@ -116,29 +120,37 @@ No manual fdsreader usage is required.
 
 ## Usage Example
 
+The following script is part of the repository as `examples/room_fire/room_fire.py`, together with the FDS output of the example in `examples/room_fire/fds_data`. The FDS output is stored with [Git LFS](https://git-lfs.com), which has to be installed to get the data when cloning the repository. All paths refer to the directory of the script, so it runs from any working directory on Linux, macOS and Windows and saves the plots next to itself:
+
+```bash
+python examples/room_fire/room_fire.py
+```
+
 ```python
 """Example script to create visibility maps."""
 
-from fdsvismap import VisMap
+import time
 from pathlib import Path
+
 import matplotlib.pyplot as plt
 
-project_root = Path(__file__).parent
-bg_img = project_root / "misc" / "floorplan.png"
+from fdsvismap import VisMap
 
-# Set path for FDS simulation directory and background image.
-sim_dir = str(project_root / "fds_data")
+# All paths refer to the directory of this script, so the example runs from any working directory.
+example_dir = Path(__file__).parent
+sim_dir = example_dir / "fds_data"
+bg_img = example_dir / "misc" / "floorplan.png"
 
-# Create instance of VisMap class
+# Create instance of VisMap class.
 vis = VisMap()
 
 # Read data from FDS simulation directory.
-vis.read_fds_data(sim_dir, fds_slc_height=2)
+vis.read_fds_data(str(sim_dir), fds_slc_height=2)
 
 # Add background image.
-vis.add_background_image(bg_img)
+vis.add_background_image(str(bg_img))
 
-# Set starpoint and waypoints along escape route.
+# Set start point and waypoints along escape route.
 vis.set_start_point(1, 9)
 vis.set_waypoint(1, 8.4, 4.8, 3, 0)
 vis.set_waypoint(2, 9.8, 4, 3, 270)
@@ -151,46 +163,60 @@ vis.set_time_points(times)
 # Add a visual obstruction that affects visibility calculations.
 vis.add_visual_obstruction(8, 8.8, 4.6, 4.8)
 
-# Do the required calculations to create the Vismap.
-vis.compute_all()
+# Do the required calculations to create the Vismap, progress=True shows progress bars.
+print("Starting computation...")
+start_time = time.perf_counter()
+vis.compute_all(progress=True)
+print(f"Computation completed in {time.perf_counter() - start_time:.2f} seconds.")
 
-# # Plot ASET map based on Vismaps and save as pdf.
+# Plot ASET map based on Vismaps and save it as pdf next to this script.
 fig, ax = vis.create_aset_map_plot(plot_obstructions=True)
 ax.set_xlim(0, 20)
 ax.set_ylim(0, 10)
-plt.savefig('aset_map.pdf', dpi=300)
-plt.close()
+aset_map_file = example_dir / "aset_map.pdf"
+fig.savefig(aset_map_file, dpi=300)
+plt.close(fig)
+print(f"ASET map saved as '{aset_map_file}'.")
 
-# # Plot time and waypoint aggregated Vismap and save as pdf.
+# Plot time and waypoint aggregated Vismap and save it as pdf next to this script.
 fig, ax = vis.create_time_agg_wp_agg_vismap_plot()
 ax.set_xlim(0, 20)
 ax.set_ylim(0, 10)
-plt.savefig('time_agg_wp_agg_vismap.pdf', dpi=300)
-plt.close()
+vismap_file = example_dir / "time_agg_wp_agg_vismap.pdf"
+fig.savefig(vismap_file, dpi=300)
+plt.close(fig)
+print(f"Time and waypoint aggregated Vismap saved as '{vismap_file}'.")
 
 # Set parameters for local evaluations.
-time = 500
+simulation_time = 450
 x = 2
 y = 4
 c = 3
 waypoint_id = 2
 
-print("\n")
+print()
 
 # Check if waypoint is visible from given location at given time.
-wp_is_visible = vis.wp_is_visible(time, x, y, waypoint_id)
-print(f"Is waypoint {waypoint_id} visible at {time} s at coordinates X/Y = ({x},{y})?: {wp_is_visible}")
+wp_is_visible = vis.wp_is_visible(simulation_time, x, y, waypoint_id)
+print(
+    f"Is waypoint {waypoint_id} visible at {simulation_time} s at coordinates X/Y = ({x},{y})?: {wp_is_visible}"
+)
 
 # Get distance from waypoint to given location.
-distance_top_wp = vis.get_distance_to_wp(x, y, waypoint_id)
-print(f"The distance from waypoint {waypoint_id} to location X/Y = ({x},{y}) is {distance_top_wp} m.")
+distance_to_wp = vis.get_distance_to_wp(x, y, waypoint_id)
+print(
+    f"The distance from waypoint {waypoint_id} to location X/Y = ({x},{y}) is {distance_to_wp} m."
+)
 
 # Calculate local visibility at given location and time, considering a specific c factor.
-local_visibility = vis.get_local_visibility(time, x, y, c)
-print(f"The local visibility at time {time} s and location X/Y = ({x},{y}) is {local_visibility:.2f} m.")
+local_visibility = vis.get_local_visibility(simulation_time, x, y, c)
+print(
+    f"The local visibility at time {simulation_time} s and location X/Y = ({x},{y}) is {local_visibility:.2f} m."
+)
 
 # Calculate visibility at given location and time relative to a waypoint, considering a specific c factor.
-visibility = vis.get_visibility_to_wp(time, x, y, waypoint_id)
-print(f"The visibility at time {time} s and location X/Y = ({x},{y}) relative to waypoint {waypoint_id} is {visibility:.2f} m.")
-
+visibility = vis.get_visibility_to_wp(simulation_time, x, y, waypoint_id)
+print(
+    f"The visibility at time {simulation_time} s and location X/Y = ({x},{y}) relative to waypoint {waypoint_id} is {visibility:.2f} m."
+)
 ```
