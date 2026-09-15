@@ -4,11 +4,12 @@ import warnings
 from pathlib import Path
 
 import matplotlib
+import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-from fdsvismap import VisMap
+from fdsvismap import MapStyle, VisMap
 
 matplotlib.use("Agg")
 
@@ -92,6 +93,17 @@ class TestVisMapBasics:
             assert vis is not None
         else:
             pytest.skip("Background image not found")
+
+    def test_background_image_extent(self, project_root):
+        """Test that the extent of the background image is stored and its order is checked."""
+        bg_img = project_root / "examples" / "room_fire" / "misc" / "floorplan.png"
+        vis = VisMap()
+        vis.add_background_image(bg_img, extent=(-2, 22, -1, 11))
+        assert vis.background_extent == (-2, 22, -1, 11)
+
+        # x_min and x_max swapped
+        with pytest.raises(ValueError):
+            vis.add_background_image(bg_img, extent=(22, -2, -1, 11))
 
 
 class TestWaypoints:
@@ -211,6 +223,101 @@ class TestPlotGeneration:
 
         assert output_file.exists()
 
+    def test_vismap_plot_creation(self, vis_map, tmp_path):
+        """Test vismap plots at a single time point in subplots."""
+        fig, axes = plt.subplots(1, 2)
+        returned_fig, ax = vis_map.plot_vismap(300, ax=axes[0])
+        assert returned_fig is fig
+        assert ax is axes[0]
+        vis_map.plot_vismap(300, waypoint_id=2, ax=axes[1], colorbar=False)
+
+        # The plotted maps are the computed vismaps, also for waypoint IDs starting at 1
+        aggregated_map = np.asarray(axes[0].get_images()[-1].get_array())
+        waypoint_map = np.asarray(axes[1].get_images()[-1].get_array())
+        np.testing.assert_array_equal(
+            aggregated_map.astype(bool), vis_map.get_wp_agg_vismap(300)
+        )
+        np.testing.assert_array_equal(
+            waypoint_map.astype(bool), vis_map.get_vismap(2, 300)
+        )
+
+        # Two maps and one colorbar
+        assert len(fig.axes) == 3
+
+        output_file = tmp_path / "test_vismap.pdf"
+        fig.savefig(output_file, dpi=300)
+        plt.close(fig)
+
+        assert output_file.exists()
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"time": 300, "waypoint_id": 7},  # unknown waypoint ID
+            {"time": 600},  # after the last computed time point
+        ],
+    )
+    def test_vismap_plot_invalid_input(self, vis_map, kwargs):
+        """Test that invalid input for vismap plots raises a ValueError."""
+        with pytest.raises(ValueError):
+            vis_map.plot_vismap(**kwargs)
+        plt.close("all")
+
+    def test_map_plot_options(self, vis_map):
+        """Test the base plot function with colorbar settings and arrays of the wrong shape."""
+        fig, ax = vis_map.plot_map(
+            vis_map.get_aset_map(),
+            cmap="jet_r",
+            cbar_kwargs={"label": "Time / s", "pad": 0.05},
+        )
+        # Map and colorbar
+        assert len(fig.axes) == 2
+        plt.close(fig)
+
+        # The extinction coefficients are stored as (nx, ny) and have to be transposed
+        extco_array = vis_map.get_extco_array_at_time(300)
+        fig, ax = vis_map.plot_map(extco_array.T, colorbar=False)
+        assert len(fig.axes) == 1
+        plt.close(fig)
+        with pytest.raises(ValueError):
+            vis_map.plot_map(extco_array)
+        plt.close("all")
+
+    def test_background_image_extent_in_plot(self, vis_map, project_root):
+        """Test that the background image is placed at its extent while the axes show the simulation domain."""
+        bg_img = project_root / "examples" / "room_fire" / "misc" / "floorplan.png"
+        vis_map.add_background_image(bg_img, extent=(-2, 22, -1, 11))
+        fig, ax = vis_map.plot_vismap(300)
+
+        assert tuple(ax.get_images()[0].get_extent()) == (-2, 22, -1, 11)
+        assert ax.get_xlim() == pytest.approx((0, 20), abs=1e-6)
+        assert ax.get_ylim() == pytest.approx((0, 10), abs=1e-6)
+        plt.close(fig)
+
+    def test_style_colors(self, vis_map):
+        """Test that the plots use the colors of the style and that changes of the style are applied."""
+        default = MapStyle()
+        fig, ax = vis_map.plot_vismap(300)
+        colors = [mcolors.to_hex(c) for c in ax.get_images()[-1].cmap.colors]
+        assert colors == [default.not_visible, default.visible]
+        plt.close(fig)
+
+        vis_map.style.visible = "#2e7d32"
+        fig, ax = vis_map.plot_vismap(300)
+        assert mcolors.to_hex(ax.get_images()[-1].cmap.colors[1]) == "#2e7d32"
+        plt.close(fig)
+
+        # ASET map scaled from 0 to the maximum time, never visible cells in their own color
+        fig, ax = vis_map.create_aset_map_plot()
+        image = ax.get_images()[-1]
+        never_visible = ~np.logical_or.reduce(vis_map.all_time_wp_agg_vismap_list)
+        assert (image.norm.vmin, image.norm.vmax) == (0, 450)
+        np.testing.assert_array_equal(
+            np.ma.getmaskarray(image.get_array()), never_visible
+        )
+        assert mcolors.to_hex(image.cmap.get_bad()) == default.never_visible
+        plt.close(fig)
+
 
 class TestFullExample:
     """Test the full example workflow."""
@@ -230,7 +337,7 @@ class TestFullExample:
 
         # Add background if available
         if bg_img.exists():
-            vis.add_background_image(bg_img)
+            vis.add_background_image(bg_img, extent=(0, 20, 0, 10))
 
         # Set waypoints
         vis.set_start_point(1, 9)
@@ -257,6 +364,12 @@ class TestFullExample:
         plt.savefig(tmp_path / "test_time_agg_vismap.pdf", dpi=300)
         plt.close()
 
+        fig3, axes = plt.subplots(1, 2, figsize=(12, 4))
+        vis.plot_vismap(300, ax=axes[0])
+        vis.plot_vismap(300, waypoint_id=2, ax=axes[1])
+        fig3.savefig(tmp_path / "test_vismap_300s.pdf", dpi=300)
+        plt.close(fig3)
+
         # Test local evaluations
         time = 450
         x, y = 2, 4
@@ -277,3 +390,4 @@ class TestFullExample:
         # Check output files exist
         assert (tmp_path / "test_aset_map.pdf").exists()
         assert (tmp_path / "test_time_agg_vismap.pdf").exists()
+        assert (tmp_path / "test_vismap_300s.pdf").exists()
