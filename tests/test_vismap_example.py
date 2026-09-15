@@ -4,11 +4,12 @@ import warnings
 from pathlib import Path
 
 import matplotlib
+import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-from fdsvismap import VisMap
+from fdsvismap import MapStyle, VisMap
 
 matplotlib.use("Agg")
 
@@ -291,6 +292,30 @@ class TestPlotGeneration:
         assert tuple(ax.get_images()[0].get_extent()) == (-2, 22, -1, 11)
         assert ax.get_xlim() == pytest.approx((0, 20), abs=1e-6)
         assert ax.get_ylim() == pytest.approx((0, 10), abs=1e-6)
+        plt.close(fig)
+
+    def test_style_colors(self, vis_map):
+        """Test that the plots use the colors of the style and that changes of the style are applied."""
+        default = MapStyle()
+        fig, ax = vis_map.plot_vismap(300)
+        colors = [mcolors.to_hex(c) for c in ax.get_images()[-1].cmap.colors]
+        assert colors == [default.not_visible, default.visible]
+        plt.close(fig)
+
+        vis_map.style.visible = "#2e7d32"
+        fig, ax = vis_map.plot_vismap(300)
+        assert mcolors.to_hex(ax.get_images()[-1].cmap.colors[1]) == "#2e7d32"
+        plt.close(fig)
+
+        # ASET map scaled from 0 to the maximum time, never visible cells in their own color
+        fig, ax = vis_map.create_aset_map_plot()
+        image = ax.get_images()[-1]
+        never_visible = ~np.logical_or.reduce(vis_map.all_time_wp_agg_vismap_list)
+        assert (image.norm.vmin, image.norm.vmax) == (0, 450)
+        np.testing.assert_array_equal(
+            np.ma.getmaskarray(image.get_array()), never_visible
+        )
+        assert mcolors.to_hex(image.cmap.get_bad()) == default.never_visible
         plt.close(fig)
 
 

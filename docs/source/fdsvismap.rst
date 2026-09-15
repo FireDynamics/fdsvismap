@@ -25,3 +25,11 @@ Waypoint
    :members:
    :undoc-members:
    :show-inheritance:
+
+MapStyle
+--------
+
+.. automodule:: fdsvismap.MapStyle
+   :members:
+   :undoc-members:
+   :show-inheritance:

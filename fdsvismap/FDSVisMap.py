@@ -23,6 +23,7 @@ import matplotlib.ticker as mticker
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
+from matplotlib.patches import Patch
 from numpy.typing import NDArray
 from skimage.draw import line, line_aa
 
@@ -31,6 +32,7 @@ from fdsvismap.helper_functions import (
     get_id_of_closest_value,
     progress_bar,
 )
+from fdsvismap.MapStyle import MapStyle
 from fdsvismap.Waypoint import Waypoint
 
 logger = logging.getLogger(__name__)
@@ -102,6 +104,8 @@ class VisMap:
     :vartype background_image: ndarray or None # TODO: Type?
     :ivar background_extent: Position of the background image as (x_min, x_max, y_min, y_max). If None, the image covers the simulation domain.
     :vartype background_extent: tuple[float, float, float, float] or None
+    :ivar style: Colors and opacities of all plots of this instance.
+    :vartype style: MapStyle
     :ivar all_time_wp_agg_vismap_list: List of waypoint-aggregated visibility maps for all time steps. Initialized as an empty list.
     :vartype all_time_wp_agg_vismap_list: list[np.ndarray]
     :ivar num_edge_cells: Number of edge cells considered for collision detection. Initialized to 1.
@@ -129,6 +133,7 @@ class VisMap:
         self.max_vis: float = 30
         self.background_image: np.ndarray = np.array([])
         self.background_extent: Optional[Tuple[float, float, float, float]] = None
+        self.style: MapStyle = MapStyle()
         self.all_time_wp_agg_vismap_list: List[BoolArray] = []
         self.num_edge_cells: int = 1
         self._t_max_computed: Optional[float] = None
@@ -763,14 +768,7 @@ class VisMap:
         for the corresponding point. Cells for points that never become non-visible are set to `max_time`.
         :rtype: np.ndarray
         """
-        if max_time is None:
-            max_time = (
-                self._t_max_computed
-                if self._t_max_computed is not None
-                else self.vismap_time_points[-1]
-            )
-        else:
-            self._check_time_in_computed_range(max_time)
+        max_time = self._get_max_time(max_time)
 
         if self.fds_grid_shape is None:
             raise RuntimeError("FDS data not loaded. Call read_fds_data() first.")
@@ -785,6 +783,25 @@ class VisMap:
             mask = ~wp_agg_vismap & (aset_map == max_time)
             aset_map[mask] = time
         return aset_map
+
+    def _get_max_time(self, max_time: Optional[float]) -> float:
+        """
+        Get the maximum time of an evaluation.
+
+        :param max_time: Requested maximum time. If None, the maximum time computed by :meth:`compute_all` is used.
+        :type max_time: float, optional
+        :raises ValueError: If ``max_time`` exceeds the maximum time computed by :meth:`compute_all`.
+        :return: The maximum time.
+        :rtype: float
+        """
+        if max_time is None:
+            return (
+                self._t_max_computed
+                if self._t_max_computed is not None
+                else self.vismap_time_points[-1]
+            )
+        self._check_time_in_computed_range(max_time)
+        return max_time
 
     def _get_waypoint_position(self, waypoint_id: int) -> int:
         """
@@ -825,7 +842,7 @@ class VisMap:
         ax: Optional[Axes] = None,
         plot_obstructions: bool = False,
         flip_y_axis: bool = True,
-        alpha: float = 0.7,
+        alpha: Optional[float] = None,
         vmin: Optional[float] = None,
         vmax: Optional[float] = None,
         colorbar: bool = True,
@@ -849,7 +866,7 @@ class VisMap:
         :type plot_obstructions: bool, optional
         :param flip_y_axis: Flag indicating whether y-axis should be flipped or not to have the origin at bottom left.
         :type flip_y_axis: bool, optional
-        :param alpha: Opacity of the map over the background image. Default is 0.7.
+        :param alpha: Opacity of the map over the background image. If None, ``style.map_alpha`` is used.
         :type alpha: float, optional
         :param vmin: Lower limit of the color scale. If None, the minimum of the map is used.
         :type vmin: float, optional
@@ -899,23 +916,28 @@ class VisMap:
                 else (bg_x_min, bg_x_max, bg_y_max, bg_y_min)
             )
             ax.imshow(self.background_image, extent=bg_extent, origin=origin)
-        if plot_obstructions:
-            ax.imshow(
-                self.obstructions_array,
-                extent=extent,
-                cmap="Grays",
-                alpha=0.5,
-                origin=origin,
-            )
         im = ax.imshow(
             map_array,
             cmap=cmap,
-            alpha=alpha,
+            alpha=self.style.map_alpha if alpha is None else alpha,
             extent=extent,
             origin=origin,
             vmin=vmin,
             vmax=vmax,
         )
+        if plot_obstructions:
+            # Only the obstructed cells are drawn, on top of the map
+            ax.imshow(
+                np.ma.masked_array(
+                    self.obstructions_array, mask=~self.obstructions_array
+                ),
+                extent=extent,
+                cmap=mcolors.ListedColormap([self.style.obstruction]),
+                alpha=self.style.obstruction_alpha,
+                origin=origin,
+                vmin=0,
+                vmax=1,
+            )
         # Fixed limits, otherwise later artists like markers rescale the axes to a larger background image
         ax.set_xlim(extent[0], extent[1])
         ax.set_ylim(extent[2], extent[3])
@@ -959,7 +981,7 @@ class VisMap:
         """
         return self.plot_map(
             map_array,
-            cmap=mcolors.ListedColormap(["red", "lime"]),
+            cmap=mcolors.ListedColormap([self.style.not_visible, self.style.visible]),
             ax=ax,
             plot_obstructions=plot_obstructions,
             flip_y_axis=flip_y_axis,
@@ -968,7 +990,8 @@ class VisMap:
             colorbar=colorbar,
             cbar_kwargs={
                 "label": None,
-                "ticks": [0, 1],
+                # Labels in the middle of the two colors
+                "ticks": [0.25, 0.75],
                 "format": mticker.FixedFormatter(["not visible", "visible"]),
             },
         )
@@ -977,7 +1000,11 @@ class VisMap:
         self, ax: Axes, waypoint_ids: Sequence[int], plot_route: bool
     ) -> None:
         """
-        Plot markers and labels of waypoints, optionally with the route from the start point through them.
+        Plot the waypoints with their labels, optionally with the route from the start point through them.
+
+        A waypoint is drawn as a short bar across its viewing direction with an arrow in the viewing direction, the
+        label is placed beyond the arrow, so it stays in the room the sign faces. Bar, arrow and label have fixed
+        sizes in points, independent of the size of the domain.
 
         :param ax: Axes to plot into.
         :type ax: matplotlib.axes.Axes
@@ -987,22 +1014,66 @@ class VisMap:
         :type plot_route: bool
         """
         waypoints = [self.all_wp_dict[waypoint_id] for waypoint_id in waypoint_ids]
-        x_values = [wp.x for wp in waypoints]
-        y_values = [wp.y for wp in waypoints]
         if plot_route:
-            x_values.insert(0, self.start_point[0])
-            y_values.insert(0, self.start_point[1])
-            ax.plot(x_values, y_values, color="darkgreen", linestyle="--")
-        ax.scatter(x_values, y_values, color="darkgreen")
+            ax.plot(
+                [self.start_point[0], *(wp.x for wp in waypoints)],
+                [self.start_point[1], *(wp.y for wp in waypoints)],
+                color=self.style.sign,
+                linestyle="--",
+                linewidth=1,
+            )
+            ax.scatter(
+                [self.start_point[0]],
+                [self.start_point[1]],
+                facecolor=self.style.start_point_face,
+                edgecolor=self.style.start_point_edge,
+                zorder=3,
+            )
+        # Directions on the screen: without flip_y_axis the y-axis points downwards
+        x_sign = -1 if ax.xaxis_inverted() else 1
+        y_sign = -1 if ax.yaxis_inverted() else 1
         for waypoint_id, wp in zip(waypoint_ids, waypoints):
-            # The label is placed below the marker with an offset in points, independent of the size of the domain
+            if wp.alpha is None:
+                ax.scatter([wp.x], [wp.y], color=self.style.sign, zorder=3)
+                label_x, label_y, label_distance = 0.0, -1.0, 8.0
+            else:
+                # Viewing direction on the screen, alpha is measured clockwise from the positive y-axis
+                view_x = float(np.sin(np.deg2rad(wp.alpha))) * x_sign
+                view_y = float(np.cos(np.deg2rad(wp.alpha))) * y_sign
+                view_angle = float(np.rad2deg(np.arctan2(view_y, view_x)))
+                # The line marker is vertical, rotated by the viewing angle it lies across the viewing direction
+                ax.plot(
+                    wp.x,
+                    wp.y,
+                    marker=(2, 2, view_angle),
+                    markersize=12,
+                    markeredgewidth=3,
+                    color=self.style.sign,
+                    zorder=3,
+                )
+                ax.annotate(
+                    "",
+                    xy=(wp.x, wp.y),
+                    xytext=(12 * view_x, 12 * view_y),
+                    textcoords="offset points",
+                    arrowprops=dict(
+                        arrowstyle="<|-",
+                        color=self.style.sign,
+                        linewidth=1.5,
+                        shrinkA=0,
+                        shrinkB=0,
+                    ),
+                    zorder=3,
+                )
+                label_x, label_y, label_distance = view_x, view_y, 16.0
             ax.annotate(
                 f"$W_{{{waypoint_id}}}$\nC : {wp.c:>}\n$\\alpha$ : {wp.alpha}$^\\circ$",
                 xy=(wp.x, wp.y),
-                xytext=(0, -8),
+                xytext=(label_distance * label_x, label_distance * label_y),
                 textcoords="offset points",
-                ha="center",
-                va="top",
+                # Aligned so that the label extends away from the sign
+                ha=("right", "center", "left")[round(label_x) + 1],
+                va=("top", "center", "bottom")[round(label_y) + 1],
                 bbox=dict(boxstyle="round", fc="w"),
                 fontsize=6,
             )
@@ -1017,6 +1088,9 @@ class VisMap:
         """
         Create a plot visualizing the ASET map (Available Safe Egress Time) map indicating for each cell the first time any waypoint is not visible.
 
+        The color scale ``style.aset_cmap`` runs from 0 to the maximum time. Cells from which no waypoint is visible
+        at any time point up to the maximum time are drawn in ``style.never_visible``.
+
         :param max_time: The maximum time value to consider for the ASET calculations. If None, it defaults to the last time in the visibility data.
         :type max_time: float, optional
         :param plot_obstructions: Flag indicating whether obstruction at the evaluation height should be plotted or not.
@@ -1028,14 +1102,43 @@ class VisMap:
         :return: A tuple containing the matplotlib figure and axes objects that display the ASET map.
         :rtype: (matplotlib.figure.Figure, matplotlib.axes.Axes)
         """
-        return self.plot_map(
-            self.get_aset_map(max_time),
-            cmap="jet_r",
+        max_time = self._get_max_time(max_time)
+        aset_map = self.get_aset_map(max_time)
+        ever_visible = np.zeros_like(aset_map, dtype=bool)
+        for time, wp_agg_vismap in zip(
+            self.vismap_time_points, self.all_time_wp_agg_vismap_list
+        ):
+            if time <= max_time:
+                ever_visible |= wp_agg_vismap
+        never_visible = ~ever_visible
+
+        # Masked cells are drawn in the "bad" color of the colormap
+        cmap = plt.get_cmap(self.style.aset_cmap).with_extremes(
+            bad=self.style.never_visible
+        )
+        fig, ax = self.plot_map(
+            np.ma.masked_array(aset_map, mask=never_visible),
+            cmap=cmap,
             ax=ax,
             plot_obstructions=plot_obstructions,
             flip_y_axis=flip_y_axis,
+            vmin=0,
+            vmax=max_time,
             cbar_kwargs={"label": "Time / s"},
         )
+        if never_visible.any():
+            ax.legend(
+                handles=[
+                    Patch(
+                        facecolor=self.style.never_visible,
+                        alpha=self.style.map_alpha,
+                        label="never visible",
+                    )
+                ],
+                loc="lower right",
+                fontsize=8,
+            )
+        return fig, ax
 
     def create_time_agg_wp_agg_vismap_plot(
         self,
@@ -1047,10 +1150,9 @@ class VisMap:
         """
         Create a plot visualizing the time-aggregated visibility map for all waypoints.
 
-        The map uses a custom color
-        map to distinguish whether any waypoint is visible (green) or not (red) from each cell. The plot also
-        features the trajectory of movement from the start point through all waypoints, highlighted with annotations
-        for each waypoint.
+        The map uses the colors ``style.visible`` and ``style.not_visible`` to distinguish whether any waypoint is
+        visible or not from each cell. The plot also features the trajectory of movement from the start point through
+        all waypoints, highlighted with annotations for each waypoint.
 
         :param t_max: The maximum time to consider. If not specified, all computed time points are used.
         :type t_max: float, optional
