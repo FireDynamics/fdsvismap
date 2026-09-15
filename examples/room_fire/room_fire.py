@@ -43,8 +43,6 @@ print(f"Computation completed in {time.perf_counter() - start_time:.2f} seconds.
 
 # Plot ASET map based on Vismaps and save it as pdf next to this script.
 fig, ax = vis.create_aset_map_plot(plot_obstructions=True)
-ax.set_xlim(0, 20)
-ax.set_ylim(0, 10)
 aset_map_file = example_dir / "aset_map.pdf"
 fig.savefig(aset_map_file, dpi=300)
 plt.close(fig)
@@ -52,8 +50,6 @@ print(f"ASET map saved as '{aset_map_file}'.")
 
 # Plot time and waypoint aggregated Vismap and save it as pdf next to this script.
 fig, ax = vis.create_time_agg_wp_agg_vismap_plot()
-ax.set_xlim(0, 20)
-ax.set_ylim(0, 10)
 time_agg_vismap_file = example_dir / "time_agg_wp_agg_vismap.pdf"
 fig.savefig(time_agg_vismap_file, dpi=300)
 plt.close(fig)
@@ -61,7 +57,7 @@ print(f"Time and waypoint aggregated Vismap saved as '{time_agg_vismap_file}'.")
 
 # Plot the Vismaps at a single time point side by side, aggregated over all waypoints and for waypoint 2 only.
 vismap_time = 300
-fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+fig, axes = plt.subplots(1, 2, figsize=(12, 4), layout="compressed")
 vis.plot_vismap(vismap_time, ax=axes[0])
 axes[0].set_title(f"All waypoints at {vismap_time} s")
 vis.plot_vismap(vismap_time, waypoint_id=2, ax=axes[1])

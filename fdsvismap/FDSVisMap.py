@@ -21,8 +21,11 @@ import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import numpy as np
+from matplotlib.artist import Artist
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
+from matplotlib.legend_handler import HandlerTuple
+from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 from numpy.typing import NDArray
 from skimage.draw import line, line_aa
@@ -44,6 +47,8 @@ IntArray = NDArray[np.intp]  # platform-index-sized int
 Int32Array = NDArray[np.int32]
 ExtCoArray = FloatArray  # extinction coefficient is float
 FigureAxes = Tuple[Figure, Axes]
+# A legend entry is a single artist or several artists drawn on top of each other
+LegendEntry = Union[Artist, Tuple[Artist, ...]]
 
 
 class RayCastingCache(TypedDict):
@@ -852,7 +857,8 @@ class VisMap:
         Plot a map of the simulation domain over the background image.
 
         The axes show the simulation domain. A background image that extends beyond the domain is cut off, use
-        ``ax.set_xlim`` and ``ax.set_ylim`` to show more of it.
+        ``ax.set_xlim`` and ``ax.set_ylim`` to show more of it. A new figure uses the compressed layout of
+        matplotlib, so that legends next to the map fit into it.
 
         :param map_array: Array of the shape (ny, nx), e.g. from :meth:`get_aset_map` or :meth:`get_wp_agg_vismap`.
                           Arrays of the shape (nx, ny) such as from :meth:`get_extco_array_at_time` have to be
@@ -891,7 +897,7 @@ class VisMap:
                 "Arrays of the shape (nx, ny) have to be transposed with .T."
             )
         if ax is None:
-            fig, ax = plt.subplots()
+            fig, ax = plt.subplots(layout="compressed")
         else:
             fig = cast(Figure, ax.figure)
 
@@ -996,15 +1002,53 @@ class VisMap:
             },
         )
 
-    def _plot_waypoints(
-        self, ax: Axes, waypoint_ids: Sequence[int], plot_route: bool
+    @staticmethod
+    def _add_legend(
+        ax: Axes, handles: Sequence[LegendEntry], title: Optional[str] = None
     ) -> None:
         """
-        Plot the waypoints with their labels, optionally with the route from the start point through them.
+        Add a legend to the right of the map, outside of the plotted area.
 
-        A waypoint is drawn as a short bar across its viewing direction with an arrow in the viewing direction, the
-        label is placed beyond the arrow, so it stays in the room the sign faces. Bar, arrow and label have fixed
-        sizes in points, independent of the size of the domain.
+        An entry that consists of several artists is drawn as those artists on top of each other, its label is taken
+        from the last one.
+
+        :param ax: Axes of the map.
+        :type ax: matplotlib.axes.Axes
+        :param handles: Legend entries.
+        :type handles: list[matplotlib.artist.Artist or tuple[matplotlib.artist.Artist, ...]]
+        :param title: Title of the legend.
+        :type title: str, optional
+        """
+        entries = list(handles)
+        labels = [
+            (entry[-1] if isinstance(entry, tuple) else entry).get_label()
+            for entry in entries
+        ]
+        ax.legend(
+            handles=entries,
+            labels=labels,
+            # ndivide=1 draws the artists of an entry on top of each other instead of next to each other
+            handler_map={tuple: HandlerTuple(ndivide=1)},
+            loc="upper left",
+            bbox_to_anchor=(1.02, 1),
+            borderaxespad=0,
+            fontsize=8,
+            # The entries of the waypoints are higher than their labels, so they need some room
+            labelspacing=0.8,
+            title=title,
+            title_fontsize=8,
+        )
+
+    def _plot_waypoints(
+        self, ax: Axes, waypoint_ids: Sequence[int], plot_route: bool
+    ) -> List[LegendEntry]:
+        """
+        Plot the waypoints with their IDs, optionally with the route from the start point through them.
+
+        A waypoint is drawn as a short bar across its viewing direction with an arrow in the viewing direction and
+        its ID beyond the arrow, so that the ID stays in the room the sign faces. Bar, arrow and ID have fixed sizes
+        in points, independent of the size of the domain. The contrast factor and the viewing angle are described by
+        the returned legend entries.
 
         :param ax: Axes to plot into.
         :type ax: matplotlib.axes.Axes
@@ -1012,6 +1056,8 @@ class VisMap:
         :type waypoint_ids: list[int]
         :param plot_route: Flag indicating whether the route from the start point through the waypoints is plotted.
         :type plot_route: bool
+        :return: Legend entries for the waypoints and, with a route, for the start point.
+        :rtype: list[matplotlib.artist.Artist or tuple[matplotlib.artist.Artist, ...]]
         """
         waypoints = [self.all_wp_dict[waypoint_id] for waypoint_id in waypoint_ids]
         if plot_route:
@@ -1067,16 +1113,70 @@ class VisMap:
                 )
                 label_x, label_y, label_distance = view_x, view_y, 16.0
             ax.annotate(
-                f"$W_{{{waypoint_id}}}$\nC : {wp.c:>}\n$\\alpha$ : {wp.alpha}$^\\circ$",
+                str(waypoint_id),
                 xy=(wp.x, wp.y),
                 xytext=(label_distance * label_x, label_distance * label_y),
                 textcoords="offset points",
-                # Aligned so that the label extends away from the sign
+                # Aligned so that the ID extends away from the sign
                 ha=("right", "center", "left")[round(label_x) + 1],
                 va=("top", "center", "bottom")[round(label_y) + 1],
-                bbox=dict(boxstyle="round", fc="w"),
-                fontsize=6,
+                color=self.style.sign,
+                bbox=dict(boxstyle="circle,pad=0.25", fc="white", ec=self.style.sign),
+                fontsize=7,
             )
+        handles: List[LegendEntry] = [
+            self._waypoint_handle(waypoint_id, wp)
+            for waypoint_id, wp in zip(waypoint_ids, waypoints)
+        ]
+        if plot_route:
+            handles.append(
+                Line2D(
+                    [],
+                    [],
+                    marker="o",
+                    linestyle="none",
+                    markerfacecolor=self.style.start_point_face,
+                    markeredgecolor=self.style.start_point_edge,
+                    label="start point",
+                )
+            )
+        return handles
+
+    def _waypoint_handle(self, waypoint_id: int, wp: Waypoint) -> Tuple[Artist, ...]:
+        """
+        Create the legend entry of a waypoint, the ID in a circle as on the map and the parameters as label.
+
+        :param waypoint_id: ID of the waypoint.
+        :type waypoint_id: int
+        :param wp: The waypoint.
+        :type wp: Waypoint
+        :return: Circle and ID of the waypoint, to be drawn on top of each other.
+        :rtype: tuple[matplotlib.artist.Artist, ...]
+        """
+        digits = len(str(waypoint_id))
+        label = f"C = {wp.c}"
+        if wp.alpha is not None:
+            label += f", $\\alpha$ = {wp.alpha}$^\\circ$"
+        circle = Line2D(
+            [],
+            [],
+            marker="o",
+            linestyle="none",
+            markerfacecolor="white",
+            markeredgecolor=self.style.sign,
+            markersize=10.5 + 2.5 * (digits - 1),
+        )
+        # The ID is rendered upright, as the text on the map, not in the italic default math font
+        number = Line2D(
+            [],
+            [],
+            marker=f"$\\mathrm{{{waypoint_id}}}$",
+            linestyle="none",
+            color=self.style.sign,
+            markersize=6,
+            label=label,
+        )
+        return circle, number
 
     def create_aset_map_plot(
         self,
@@ -1084,12 +1184,14 @@ class VisMap:
         plot_obstructions: bool = False,
         flip_y_axis: bool = True,
         ax: Optional[Axes] = None,
+        legend: bool = True,
     ) -> FigureAxes:
         """
         Create a plot visualizing the ASET map (Available Safe Egress Time) map indicating for each cell the first time any waypoint is not visible.
 
         The color scale ``style.aset_cmap`` runs from 0 to the maximum time. Cells from which no waypoint is visible
-        at any time point up to the maximum time are drawn in ``style.never_visible``.
+        at any time point up to the maximum time are drawn in ``style.never_visible`` and described by a legend to
+        the right of the map.
 
         :param max_time: The maximum time value to consider for the ASET calculations. If None, it defaults to the last time in the visibility data.
         :type max_time: float, optional
@@ -1099,6 +1201,8 @@ class VisMap:
         :type flip_y_axis:  bool, Default is True.
         :param ax: Axes to plot into, e.g. a subplot. If None, a new figure is created.
         :type ax: matplotlib.axes.Axes, optional
+        :param legend: Flag indicating whether a legend is added. Default is True.
+        :type legend: bool, optional
         :return: A tuple containing the matplotlib figure and axes objects that display the ASET map.
         :rtype: (matplotlib.figure.Figure, matplotlib.axes.Axes)
         """
@@ -1126,17 +1230,16 @@ class VisMap:
             vmax=max_time,
             cbar_kwargs={"label": "Time / s"},
         )
-        if never_visible.any():
-            ax.legend(
-                handles=[
+        if legend and never_visible.any():
+            self._add_legend(
+                ax,
+                [
                     Patch(
                         facecolor=self.style.never_visible,
                         alpha=self.style.map_alpha,
                         label="never visible",
                     )
                 ],
-                loc="lower right",
-                fontsize=8,
             )
         return fig, ax
 
@@ -1146,13 +1249,15 @@ class VisMap:
         plot_obstructions: bool = False,
         flip_y_axis: bool = True,
         ax: Optional[Axes] = None,
+        legend: bool = True,
     ) -> FigureAxes:
         """
         Create a plot visualizing the time-aggregated visibility map for all waypoints.
 
         The map uses the colors ``style.visible`` and ``style.not_visible`` to distinguish whether any waypoint is
         visible or not from each cell. The plot also features the trajectory of movement from the start point through
-        all waypoints, highlighted with annotations for each waypoint.
+        all waypoints, marked with their IDs. The contrast factor and the viewing angle of each waypoint are given in
+        a legend to the right of the map.
 
         :param t_max: The maximum time to consider. If not specified, all computed time points are used.
         :type t_max: float, optional
@@ -1162,6 +1267,8 @@ class VisMap:
         :type flip_y_axis:  bool, Default is True.
         :param ax: Axes to plot into, e.g. a subplot. If None, a new figure is created.
         :type ax: matplotlib.axes.Axes, optional
+        :param legend: Flag indicating whether a legend is added. Default is True.
+        :type legend: bool, optional
         :return: A tuple containing the matplotlib figure and axes objects that display the aggregated visibility map.
         :rtype: (matplotlib.figure.Figure, matplotlib.axes.Axes)
         """
@@ -1172,7 +1279,9 @@ class VisMap:
             flip_y_axis=flip_y_axis,
             colorbar=True,
         )
-        self._plot_waypoints(ax, list(self.all_wp_dict), plot_route=True)
+        handles = self._plot_waypoints(ax, list(self.all_wp_dict), plot_route=True)
+        if legend and handles:
+            self._add_legend(ax, handles, title="Waypoints")
         return fig, ax
 
     def plot_vismap(
@@ -1183,12 +1292,13 @@ class VisMap:
         plot_obstructions: bool = False,
         flip_y_axis: bool = True,
         colorbar: bool = True,
+        legend: bool = True,
     ) -> FigureAxes:
         """
         Plot the boolean vismap at a time point, either of one waypoint or aggregated over all waypoints.
 
         The time is rounded to the closest time point computed by :meth:`compute_all`. The plot shows the waypoints
-        with their labels.
+        with their IDs, their contrast factor and viewing angle are given in a legend to the right of the map.
 
         :param time: Time point in seconds.
         :type time: float
@@ -1202,6 +1312,8 @@ class VisMap:
         :type flip_y_axis: bool, optional
         :param colorbar: Flag indicating whether a colorbar is added. Default is True.
         :type colorbar: bool, optional
+        :param legend: Flag indicating whether a legend of the waypoints is added. Default is True.
+        :type legend: bool, optional
         :raises RuntimeError: If :meth:`compute_all` has not been called.
         :raises ValueError: If ``time`` exceeds the maximum computed time or there is no waypoint with this ID.
         :return: The figure and the axes of the plot.
@@ -1225,7 +1337,9 @@ class VisMap:
             flip_y_axis=flip_y_axis,
             colorbar=colorbar,
         )
-        self._plot_waypoints(ax, waypoint_ids, plot_route=False)
+        handles = self._plot_waypoints(ax, waypoint_ids, plot_route=False)
+        if legend and handles:
+            self._add_legend(ax, handles, title="Waypoints")
         return fig, ax
 
     def add_background_image(
