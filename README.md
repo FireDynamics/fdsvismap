@@ -147,8 +147,9 @@ vis = VisMap()
 # Read data from FDS simulation directory.
 vis.read_fds_data(str(sim_dir), fds_slc_height=2)
 
-# Add background image.
-vis.add_background_image(str(bg_img))
+# Add background image, extent is the position of its edges as (x_min, x_max, y_min, y_max) in FDS coordinates.
+# The image may also extend beyond the simulation domain.
+vis.add_background_image(str(bg_img), extent=(0, 20, 0, 10))
 
 # Set start point and waypoints along escape route.
 vis.set_start_point(1, 9)
@@ -182,10 +183,22 @@ print(f"ASET map saved as '{aset_map_file}'.")
 fig, ax = vis.create_time_agg_wp_agg_vismap_plot()
 ax.set_xlim(0, 20)
 ax.set_ylim(0, 10)
-vismap_file = example_dir / "time_agg_wp_agg_vismap.pdf"
+time_agg_vismap_file = example_dir / "time_agg_wp_agg_vismap.pdf"
+fig.savefig(time_agg_vismap_file, dpi=300)
+plt.close(fig)
+print(f"Time and waypoint aggregated Vismap saved as '{time_agg_vismap_file}'.")
+
+# Plot the Vismaps at a single time point side by side, aggregated over all waypoints and for waypoint 2 only.
+vismap_time = 300
+fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+vis.plot_vismap(vismap_time, ax=axes[0])
+axes[0].set_title(f"All waypoints at {vismap_time} s")
+vis.plot_vismap(vismap_time, waypoint_id=2, ax=axes[1])
+axes[1].set_title(f"Waypoint 2 at {vismap_time} s")
+vismap_file = example_dir / f"vismap_{vismap_time}s.pdf"
 fig.savefig(vismap_file, dpi=300)
 plt.close(fig)
-print(f"Time and waypoint aggregated Vismap saved as '{vismap_file}'.")
+print(f"Vismaps at {vismap_time} s saved as '{vismap_file}'.")
 
 # Set parameters for local evaluations.
 simulation_time = 450

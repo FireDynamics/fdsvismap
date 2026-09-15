@@ -17,7 +17,6 @@ from typing import (
 )
 
 import fdsreader as fds  # type: ignore[import-untyped]
-import matplotlib.colors
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
@@ -101,6 +100,8 @@ class VisMap:
     :vartype fds_slc_height: float or None
     :ivar background_image: Background image for the plot. Initialized as None.
     :vartype background_image: ndarray or None # TODO: Type?
+    :ivar background_extent: Position of the background image as (x_min, x_max, y_min, y_max). If None, the image covers the simulation domain.
+    :vartype background_extent: tuple[float, float, float, float] or None
     :ivar all_time_wp_agg_vismap_list: List of waypoint-aggregated visibility maps for all time steps. Initialized as an empty list.
     :vartype all_time_wp_agg_vismap_list: list[np.ndarray]
     :ivar num_edge_cells: Number of edge cells considered for collision detection. Initialized to 1.
@@ -127,6 +128,7 @@ class VisMap:
         self.min_vis: float = 0.0
         self.max_vis: float = 30
         self.background_image: np.ndarray = np.array([])
+        self.background_extent: Optional[Tuple[float, float, float, float]] = None
         self.all_time_wp_agg_vismap_list: List[BoolArray] = []
         self.num_edge_cells: int = 1
         self._t_max_computed: Optional[float] = None
@@ -784,46 +786,119 @@ class VisMap:
             aset_map[mask] = time
         return aset_map
 
-    def _create_map_plot(
+    def _get_waypoint_position(self, waypoint_id: int) -> int:
+        """
+        Get the position of a waypoint in the lists of computed vismaps.
+
+        :param waypoint_id: ID of the waypoint.
+        :type waypoint_id: int
+        :raises ValueError: If there is no waypoint with this ID.
+        :return: Position of the waypoint in the order in which the waypoints were set.
+        :rtype: int
+        """
+        if waypoint_id not in self.all_wp_dict:
+            raise ValueError(
+                f"No waypoint with ID {waypoint_id}. Available IDs: {list(self.all_wp_dict)}"
+            )
+        return list(self.all_wp_dict).index(waypoint_id)
+
+    def _get_domain_extent(self) -> Tuple[float, float, float, float]:
+        """
+        Get the extent of the cells of the simulation domain.
+
+        The edges lie half a cell outside the outermost cell centres, so that each pixel of a map covers its cell.
+
+        :return: Extent as (x_min, x_max, y_min, y_max).
+        :rtype: tuple[float, float, float, float]
+        """
+        return (
+            float(self.all_x_coords[0] - self.cell_size[0] / 2),
+            float(self.all_x_coords[-1] + self.cell_size[0] / 2),
+            float(self.all_y_coords[0] - self.cell_size[1] / 2),
+            float(self.all_y_coords[-1] + self.cell_size[1] / 2),
+        )
+
+    def plot_map(
         self,
-        map_array: Union[BoolArray, IntArray],
-        cmap: Union[str, mcolors.Colormap],
-        plot_obstructions: bool,
-        flip_y_axis: bool,
-        **cbar_kwargs: Any,
+        map_array: np.ndarray,
+        cmap: Union[str, mcolors.Colormap] = "viridis",
+        ax: Optional[Axes] = None,
+        plot_obstructions: bool = False,
+        flip_y_axis: bool = True,
+        alpha: float = 0.7,
+        vmin: Optional[float] = None,
+        vmax: Optional[float] = None,
+        colorbar: bool = True,
+        cbar_kwargs: Optional[Dict[str, Any]] = None,
     ) -> FigureAxes:
         """
-        Create a labeled matplotlib plot of a given map array using a specified colormap and colorbar settings.
+        Plot a map of the simulation domain over the background image.
 
-        :param map_array: A 2D numpy array representing the data to be plotted.
+        The axes show the simulation domain. A background image that extends beyond the domain is cut off, use
+        ``ax.set_xlim`` and ``ax.set_ylim`` to show more of it.
+
+        :param map_array: Array of the shape (ny, nx), e.g. from :meth:`get_aset_map` or :meth:`get_wp_agg_vismap`.
+                          Arrays of the shape (nx, ny) such as from :meth:`get_extco_array_at_time` have to be
+                          transposed with ``.T``.
         :type map_array: np.ndarray
-        :param cmap: Colormap used for visualizing the data.
-        :type cmap: str or matplotlib.colors.Colormap
-        :param cbar_kwargs: Keyword arguments for configuring the colorbar (e.g., label, orientation).
-                            These are passed directly to `fig.colorbar()`.
+        :param cmap: Colormap of the map. Default is 'viridis'.
+        :type cmap: str or matplotlib.colors.Colormap, optional
+        :param ax: Axes to plot into, e.g. a subplot. If None, a new figure is created.
+        :type ax: matplotlib.axes.Axes, optional
         :param plot_obstructions: Flag indicating whether obstruction at the evaluation height should be plotted or not.
         :type plot_obstructions: bool, optional
         :param flip_y_axis: Flag indicating whether y-axis should be flipped or not to have the origin at bottom left.
-        :type flip_y_axis:  bool, optional
-        :type cbar_kwargs: dict
-        :return: A tuple containing the matplotlib figure and axes objects.
-        :rtype: (matplotlib.figure.Figure, matplotlib.axes._subplots.AxesSubplot)
-
+        :type flip_y_axis: bool, optional
+        :param alpha: Opacity of the map over the background image. Default is 0.7.
+        :type alpha: float, optional
+        :param vmin: Lower limit of the color scale. If None, the minimum of the map is used.
+        :type vmin: float, optional
+        :param vmax: Upper limit of the color scale. If None, the maximum of the map is used.
+        :type vmax: float, optional
+        :param colorbar: Flag indicating whether a colorbar is added. Default is True.
+        :type colorbar: bool, optional
+        :param cbar_kwargs: Keyword arguments for ``Figure.colorbar``, e.g. ``label`` or ``pad``. They override the
+                            defaults ``orientation="horizontal"`` and ``pad=0.15``.
+        :type cbar_kwargs: dict, optional
+        :raises RuntimeError: If no FDS data has been read.
+        :raises ValueError: If the shape of the map does not match the grid.
+        :return: The figure and the axes of the plot.
+        :rtype: (matplotlib.figure.Figure, matplotlib.axes.Axes)
         """
-        origin: Literal["upper", "lower"] = "lower" if flip_y_axis else "upper"
-        # The image edges lie half a cell outside the outermost cell centres, so that each pixel covers its cell
-        x_min = float(self.all_x_coords[0] - self.cell_size[0] / 2)
-        x_max = float(self.all_x_coords[-1] + self.cell_size[0] / 2)
-        y_min = float(self.all_y_coords[0] - self.cell_size[1] / 2)
-        y_max = float(self.all_y_coords[-1] + self.cell_size[1] / 2)
-        if flip_y_axis:
-            extent = (x_min, x_max, y_min, y_max)
+        if self.fds_grid_shape is None:
+            raise RuntimeError("FDS data not loaded. Call read_fds_data() first.")
+        grid_shape = (self.fds_grid_shape[1], self.fds_grid_shape[0])
+        if map_array.shape != grid_shape:
+            raise ValueError(
+                f"The map has the shape {map_array.shape}, expected (ny, nx) = {grid_shape}. "
+                "Arrays of the shape (nx, ny) have to be transposed with .T."
+            )
+        if ax is None:
+            fig, ax = plt.subplots()
         else:
-            extent = (x_min, x_max, y_max, y_min)
-        fig, ax = plt.subplots()
+            fig = cast(Figure, ax.figure)
+
+        origin: Literal["upper", "lower"] = "lower" if flip_y_axis else "upper"
+        x_min, x_max, y_min, y_max = self._get_domain_extent()
+        extent = (
+            (x_min, x_max, y_min, y_max)
+            if flip_y_axis
+            else (x_min, x_max, y_max, y_min)
+        )
         # Without add_background_image() the background image is an empty array
         if self.background_image is not None and self.background_image.size:
-            ax.imshow(self.background_image, extent=extent, origin=origin)
+            bg_x_min, bg_x_max, bg_y_min, bg_y_max = self.background_extent or (
+                x_min,
+                x_max,
+                y_min,
+                y_max,
+            )
+            bg_extent = (
+                (bg_x_min, bg_x_max, bg_y_min, bg_y_max)
+                if flip_y_axis
+                else (bg_x_min, bg_x_max, bg_y_max, bg_y_min)
+            )
+            ax.imshow(self.background_image, extent=bg_extent, origin=origin)
         if plot_obstructions:
             ax.imshow(
                 self.obstructions_array,
@@ -832,49 +907,142 @@ class VisMap:
                 alpha=0.5,
                 origin=origin,
             )
-        im = ax.imshow(map_array, cmap=cmap, alpha=0.7, extent=extent, origin=origin)
-
-        fig.colorbar(
-            mappable=im, ax=ax, orientation="horizontal", pad=0.15, **cbar_kwargs
+        im = ax.imshow(
+            map_array,
+            cmap=cmap,
+            alpha=alpha,
+            extent=extent,
+            origin=origin,
+            vmin=vmin,
+            vmax=vmax,
         )
+        # Fixed limits, otherwise later artists like markers rescale the axes to a larger background image
+        ax.set_xlim(extent[0], extent[1])
+        ax.set_ylim(extent[2], extent[3])
+
+        if colorbar:
+            fig.colorbar(
+                mappable=im,
+                ax=ax,
+                **{"orientation": "horizontal", "pad": 0.15, **(cbar_kwargs or {})},
+            )
         ax.set_xlabel("$X$ / m")
         ax.set_ylabel("$Y$ / m")
         return fig, ax
+
+    def _plot_boolean_map(
+        self,
+        map_array: BoolArray,
+        ax: Optional[Axes],
+        plot_obstructions: bool,
+        flip_y_axis: bool,
+        colorbar: bool,
+    ) -> FigureAxes:
+        """
+        Plot a boolean vismap with one color for cells from which no waypoint is visible and one for the others.
+
+        The color scale is fixed to 0 and 1, so that a map without any visible cell or with only visible cells keeps
+        its colors.
+
+        :param map_array: Boolean vismap of the shape (ny, nx).
+        :type map_array: np.ndarray
+        :param ax: Axes to plot into. If None, a new figure is created.
+        :type ax: matplotlib.axes.Axes, optional
+        :param plot_obstructions: Flag indicating whether obstruction at the evaluation height should be plotted or not.
+        :type plot_obstructions: bool
+        :param flip_y_axis: Flag indicating whether y-axis should be flipped or not to have the origin at bottom left.
+        :type flip_y_axis: bool
+        :param colorbar: Flag indicating whether a colorbar is added.
+        :type colorbar: bool
+        :return: The figure and the axes of the plot.
+        :rtype: (matplotlib.figure.Figure, matplotlib.axes.Axes)
+        """
+        return self.plot_map(
+            map_array,
+            cmap=mcolors.ListedColormap(["red", "lime"]),
+            ax=ax,
+            plot_obstructions=plot_obstructions,
+            flip_y_axis=flip_y_axis,
+            vmin=0,
+            vmax=1,
+            colorbar=colorbar,
+            cbar_kwargs={
+                "label": None,
+                "ticks": [0, 1],
+                "format": mticker.FixedFormatter(["not visible", "visible"]),
+            },
+        )
+
+    def _plot_waypoints(
+        self, ax: Axes, waypoint_ids: Sequence[int], plot_route: bool
+    ) -> None:
+        """
+        Plot markers and labels of waypoints, optionally with the route from the start point through them.
+
+        :param ax: Axes to plot into.
+        :type ax: matplotlib.axes.Axes
+        :param waypoint_ids: IDs of the waypoints to plot.
+        :type waypoint_ids: list[int]
+        :param plot_route: Flag indicating whether the route from the start point through the waypoints is plotted.
+        :type plot_route: bool
+        """
+        waypoints = [self.all_wp_dict[waypoint_id] for waypoint_id in waypoint_ids]
+        x_values = [wp.x for wp in waypoints]
+        y_values = [wp.y for wp in waypoints]
+        if plot_route:
+            x_values.insert(0, self.start_point[0])
+            y_values.insert(0, self.start_point[1])
+            ax.plot(x_values, y_values, color="darkgreen", linestyle="--")
+        ax.scatter(x_values, y_values, color="darkgreen")
+        for waypoint_id, wp in zip(waypoint_ids, waypoints):
+            # The label is placed below the marker with an offset in points, independent of the size of the domain
+            ax.annotate(
+                f"$W_{{{waypoint_id}}}$\nC : {wp.c:>}\n$\\alpha$ : {wp.alpha}$^\\circ$",
+                xy=(wp.x, wp.y),
+                xytext=(0, -8),
+                textcoords="offset points",
+                ha="center",
+                va="top",
+                bbox=dict(boxstyle="round", fc="w"),
+                fontsize=6,
+            )
 
     def create_aset_map_plot(
         self,
         max_time: Optional[float] = None,
         plot_obstructions: bool = False,
         flip_y_axis: bool = True,
+        ax: Optional[Axes] = None,
     ) -> FigureAxes:
         """
         Create a plot visualizing the ASET map (Available Safe Egress Time) map indicating for each cell the first time any waypoint is not visible.
 
         :param max_time: The maximum time value to consider for the ASET calculations. If None, it defaults to the last time in the visibility data.
-        :type max_time: int, optional
+        :type max_time: float, optional
         :param plot_obstructions: Flag indicating whether obstruction at the evaluation height should be plotted or not.
         :type plot_obstructions: bool, optional
         :param flip_y_axis: Flag indicating whether y-axis should be flipped or not to have the origin at bottom left.
         :type flip_y_axis:  bool, Default is True.
+        :param ax: Axes to plot into, e.g. a subplot. If None, a new figure is created.
+        :type ax: matplotlib.axes.Axes, optional
         :return: A tuple containing the matplotlib figure and axes objects that display the ASET map.
-        :rtype: (matplotlib.figure.Figure, matplotlib.axes._subplots.AxesSubplot)
+        :rtype: (matplotlib.figure.Figure, matplotlib.axes.Axes)
         """
-        aset_map_array = self.get_aset_map(max_time)
-        cbar_kwargs = {"label": "Time / s"}
-        fig, ax = self._create_map_plot(
-            map_array=aset_map_array,
+        return self.plot_map(
+            self.get_aset_map(max_time),
             cmap="jet_r",
+            ax=ax,
             plot_obstructions=plot_obstructions,
             flip_y_axis=flip_y_axis,
-            **cbar_kwargs,
+            cbar_kwargs={"label": "Time / s"},
         )
-        return fig, ax
 
     def create_time_agg_wp_agg_vismap_plot(
         self,
         t_max: Optional[float] = None,
         plot_obstructions: bool = False,
         flip_y_axis: bool = True,
+        ax: Optional[Axes] = None,
     ) -> FigureAxes:
         """
         Create a plot visualizing the time-aggregated visibility map for all waypoints.
@@ -890,58 +1058,98 @@ class VisMap:
         :type plot_obstructions: bool, optional
         :param flip_y_axis: Flag indicating whether y-axis should be flipped or not to have the origin at bottom left.
         :type flip_y_axis:  bool, Default is True.
+        :param ax: Axes to plot into, e.g. a subplot. If None, a new figure is created.
+        :type ax: matplotlib.axes.Axes, optional
         :return: A tuple containing the matplotlib figure and axes objects that display the aggregated visibility map.
-        :rtype: (matplotlib.figure.Figure, matplotlib.axes._subplots.AxesSubplot)
+        :rtype: (matplotlib.figure.Figure, matplotlib.axes.Axes)
         """
-        cmap = matplotlib.colors.ListedColormap(["red", "lime"])
-        cbar_kwargs = {
-            "label": None,
-            "ticks": [0, 1],
-            "format": mticker.FixedFormatter(["not visible", "visible"]),
-        }
-        fig, ax = self._create_map_plot(
-            map_array=self.get_time_agg_wp_agg_vismap(t_max),
-            cmap=cmap,
+        fig, ax = self._plot_boolean_map(
+            self.get_time_agg_wp_agg_vismap(t_max),
+            ax=ax,
             plot_obstructions=plot_obstructions,
             flip_y_axis=flip_y_axis,
-            **cbar_kwargs,
+            colorbar=True,
         )
-        x_values = [wp.x for wp in self.all_wp_dict.values()]
-        y_values = [wp.y for wp in self.all_wp_dict.values()]
-
-        ax.plot(
-            (self.start_point[0], *x_values),
-            (self.start_point[1], *y_values),
-            color="darkgreen",
-            linestyle="--",
-        )
-        ax.scatter(
-            (self.start_point[0], *x_values),
-            (self.start_point[1], *y_values),
-            color="darkgreen",
-        )
-        for wp_id, wp in self.all_wp_dict.items():
-            ax.annotate(
-                f"$W_{{{wp_id}}}$\nC : {wp.c:>}\n$\\alpha$ : {wp.alpha}$^\\circ$",
-                xy=(wp.x - 1, wp.y - 2),
-                bbox=dict(boxstyle="round", fc="w"),
-                fontsize=6,
-            )
-
+        self._plot_waypoints(ax, list(self.all_wp_dict), plot_route=True)
         return fig, ax
 
-    def add_background_image(self, file: str) -> None:
+    def plot_vismap(
+        self,
+        time: float,
+        waypoint_id: Optional[int] = None,
+        ax: Optional[Axes] = None,
+        plot_obstructions: bool = False,
+        flip_y_axis: bool = True,
+        colorbar: bool = True,
+    ) -> FigureAxes:
+        """
+        Plot the boolean vismap at a time point, either of one waypoint or aggregated over all waypoints.
+
+        The time is rounded to the closest time point computed by :meth:`compute_all`. The plot shows the waypoints
+        with their labels.
+
+        :param time: Time point in seconds.
+        :type time: float
+        :param waypoint_id: ID of the waypoint. If None, the vismap aggregated over all waypoints is plotted.
+        :type waypoint_id: int, optional
+        :param ax: Axes to plot into, e.g. a subplot. If None, a new figure is created.
+        :type ax: matplotlib.axes.Axes, optional
+        :param plot_obstructions: Flag indicating whether obstruction at the evaluation height should be plotted or not.
+        :type plot_obstructions: bool, optional
+        :param flip_y_axis: Flag indicating whether y-axis should be flipped or not to have the origin at bottom left.
+        :type flip_y_axis: bool, optional
+        :param colorbar: Flag indicating whether a colorbar is added. Default is True.
+        :type colorbar: bool, optional
+        :raises RuntimeError: If :meth:`compute_all` has not been called.
+        :raises ValueError: If ``time`` exceeds the maximum computed time or there is no waypoint with this ID.
+        :return: The figure and the axes of the plot.
+        :rtype: (matplotlib.figure.Figure, matplotlib.axes.Axes)
+        """
+        if not self.all_time_wp_agg_vismap_list:
+            raise RuntimeError("No vismaps computed. Call compute_all() first.")
+        if waypoint_id is None:
+            vismap = self.get_wp_agg_vismap(time)
+            waypoint_ids = list(self.all_wp_dict)
+        else:
+            position = self._get_waypoint_position(waypoint_id)
+            self._check_time_in_computed_range(time)
+            time_id = get_id_of_closest_value(self.vismap_time_points, time)
+            vismap = self.all_time_all_wp_vismap_array_list[time_id][position]
+            waypoint_ids = [waypoint_id]
+        fig, ax = self._plot_boolean_map(
+            vismap,
+            ax=ax,
+            plot_obstructions=plot_obstructions,
+            flip_y_axis=flip_y_axis,
+            colorbar=colorbar,
+        )
+        self._plot_waypoints(ax, waypoint_ids, plot_route=False)
+        return fig, ax
+
+    def add_background_image(
+        self, file: str, extent: Optional[Tuple[float, float, float, float]] = None
+    ) -> None:
         """
         Load and set a background image for future plots created within this visualization class.
 
         :param file: Path to the image file that will be used as the background.
         :type file: str
+        :param extent: Position of the image edges in global FDS coordinates as (x_min, x_max, y_min, y_max). The
+                       image may extend beyond the simulation domain. If None, the image covers exactly the
+                       simulation domain.
+        :type extent: tuple[float, float, float, float], optional
+        :raises ValueError: If the extent is not ordered as (x_min, x_max, y_min, y_max).
         """
+        if extent is not None and not (extent[0] < extent[1] and extent[2] < extent[3]):
+            raise ValueError(
+                f"The extent {extent} has to be ordered as (x_min, x_max, y_min, y_max)."
+            )
         image = plt.imread(file)
         # PNG files are read as float32 in [0, 1], uint8 needs a quarter of the memory
         if np.issubdtype(image.dtype, np.floating):
             image = np.round(image * 255).astype(np.uint8)
         self.background_image = np.flip(image, axis=0)
+        self.background_extent = extent
 
     def compute_all(
         self,
