@@ -444,6 +444,7 @@ class VisMap:
         :param waypoint_id: The index of the waypoint for which view angles are to be calculated.
         :type waypoint_id: int
         :return: A 2D numpy array with the cosine values of the view angles from the waypoint to each cell.
+                 A cell at the position of the waypoint itself (distance 0) gets the value 1.
         :rtype: np.ndarray
         """
         distance_array = self._get_dist_array(waypoint_id)
@@ -453,11 +454,13 @@ class VisMap:
             view_angle_array = cast(
                 FloatArray,
                 np.clip(
-                    (
+                    np.divide(
                         np.sin(np.deg2rad(wp.alpha)) * (self.xv - wp.x)
-                        + np.cos(np.deg2rad(wp.alpha)) * (self.yv - wp.y)
-                    )
-                    / distance_array,
+                        + np.cos(np.deg2rad(wp.alpha)) * (self.yv - wp.y),
+                        distance_array,
+                        out=np.ones_like(distance_array, dtype=np.float64),
+                        where=distance_array > 0,
+                    ),
                     0,
                     1,
                 ),
