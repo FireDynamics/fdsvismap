@@ -4,6 +4,7 @@ import logging
 from typing import (
     Any,
     Dict,
+    Iterable,
     List,
     Literal,
     Optional,
@@ -223,15 +224,12 @@ class VisMap:
         :type fds_slc_id: str
         :param fds_slc_height: The height at which to evaluate visibility. Default is 2.
         :type fds_slc_height: float, optional
+        :raises ValueError: If no matching slice is found. The message lists the available slices.
         """
         sim = fds.Simulation(sim_dir)
         if fds_slc_id:
             self.slc = sim.slices.get_by_id(fds_slc_id)
-            logger.info(
-                "Slice with ID %s was selected, its quantity is not checked and treated as %s.",
-                fds_slc_id,
-                self.quantity,
-            )
+            searched_slice = f"with ID {fds_slc_id!r}"
         else:
             if self.quantity in [
                 "ext_coef_C",
@@ -239,20 +237,31 @@ class VisMap:
                 "SOOT EXTINCTION COEFFICIENT",
                 "EXTINCTION COEFFICIENT",
             ]:
-                self.slc = sim.slices.filter_by_quantity(
-                    "SOOT EXTINCTION COEFFICIENT"
-                ).get_nearest(0, 0, fds_slc_height)
+                fds_quantity = "SOOT EXTINCTION COEFFICIENT"
             elif self.quantity in [
                 "OD_C",
                 "OD_C0.9H0.1",
                 "SOOT OPTICAL DENSITY",
                 "OPTICAL DENSITY",
             ]:
-                self.slc = sim.slices.filter_by_quantity(
-                    "SOOT OPTICAL DENSITY"
-                ).get_nearest(0, 0, fds_slc_height)
+                fds_quantity = "SOOT OPTICAL DENSITY"
             else:
                 raise ValueError(f"Unsupported quantity: {self.quantity}")
+            self.slc = sim.slices.filter_by_quantity(fds_quantity).get_nearest(
+                0, 0, fds_slc_height
+            )
+            searched_slice = f"with quantity {fds_quantity!r}"
+        if self.slc is None:
+            raise ValueError(
+                f"No slice {searched_slice} found in {sim_dir}. Select one of the available slices "
+                f"with fds_slc_id:\n{self._describe_slices(sim.slices)}"
+            )
+        if fds_slc_id:
+            logger.info(
+                "Slice with ID %s was selected, its quantity is not checked and treated as %s.",
+                fds_slc_id,
+                self.quantity,
+            )
         self.extent = np.array(self.slc.extent._extents)
         self.all_x_coords = self.slc.get_coordinates()["x"]
         self.all_y_coords = self.slc.get_coordinates()["y"]
@@ -266,6 +275,26 @@ class VisMap:
         self.fds_slc_height = fds_slc_height
         self._slice_frames = {}
         self.build_obstructions_array()
+
+    @staticmethod
+    def _describe_slices(slices: Iterable[Any]) -> str:
+        """
+        Describe FDS slices by ID, quantity and position, one slice per line.
+
+        :param slices: Slices of an FDS simulation.
+        :type slices: fdsreader.slcf.SliceCollection
+        :return: Description of the slices.
+        :rtype: str
+        """
+        lines = []
+        for slc in slices:
+            if slc.orientation == 0:
+                position = "3D"
+            else:
+                axis = ("x", "y", "z")[slc.orientation - 1]
+                position = f"{axis} = {slc.extent[axis][0]:.2f} m"
+            lines.append(f"  {slc.id or '(no ID)'}: {slc.quantity.name}, {position}")
+        return "\n".join(lines) if lines else "  (none)"
 
     def _get_required_time_indices(self) -> Set[int]:
         """
