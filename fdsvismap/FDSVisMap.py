@@ -752,13 +752,13 @@ class VisMap:
         """
         Generate a map indicating the earliest time at which each point becomes non-visible.
 
-        :param max_time: The maximum time to consider. If not specified, the last time in `self.times` is used.
-        :type max_time: int, optional
+        :param max_time: The maximum time to consider. If None, the maximum time computed by :meth:`compute_all` is used.
+        :type max_time: float, optional
         :return: A 2D array where each cell represents the earliest time of non-visibility
         for the corresponding point. Cells for points that never become non-visible are set to `max_time`.
         :rtype: np.ndarray
         """
-        if not max_time:
+        if max_time is None:
             max_time = (
                 self._t_max_computed
                 if self._t_max_computed is not None
