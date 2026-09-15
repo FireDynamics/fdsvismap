@@ -24,9 +24,9 @@ import numpy as np
 from matplotlib.artist import Artist
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
-from matplotlib.legend_handler import HandlerTuple
+from matplotlib.legend_handler import HandlerBase
 from matplotlib.lines import Line2D
-from matplotlib.patches import Patch
+from matplotlib.text import Text
 from numpy.typing import NDArray
 from skimage.draw import line, line_aa
 
@@ -47,8 +47,42 @@ IntArray = NDArray[np.intp]  # platform-index-sized int
 Int32Array = NDArray[np.int32]
 ExtCoArray = FloatArray  # extinction coefficient is float
 FigureAxes = Tuple[Figure, Axes]
-# A legend entry is a single artist or several artists drawn on top of each other
-LegendEntry = Union[Artist, Tuple[Artist, ...]]
+
+
+class _TextHandler(HandlerBase):
+    """
+    Legend handler that draws a text handle, so that a legend entry looks exactly like the text on the map.
+
+    :param text_kwargs: Properties of the text, the same ones the map is annotated with.
+    :type text_kwargs: dict
+    """
+
+    def __init__(self, text_kwargs: Dict[str, Any]) -> None:
+        super().__init__()
+        self.text_kwargs = text_kwargs
+
+    def create_artists(
+        self,
+        legend: Any,
+        orig_handle: Any,
+        xdescent: float,
+        ydescent: float,
+        width: float,
+        height: float,
+        fontsize: float,
+        trans: Any,
+    ) -> List[Artist]:
+        """Create the text of a legend entry, centered in the area reserved for the handle."""
+        text = Text(
+            width / 2 - xdescent,
+            height / 2 - ydescent,
+            orig_handle.get_text(),
+            ha="center",
+            va="center",
+            **self.text_kwargs,
+        )
+        text.set_transform(trans)
+        return [text]
 
 
 class RayCastingCache(TypedDict):
@@ -1002,46 +1036,52 @@ class VisMap:
             },
         )
 
-    @staticmethod
+    def _waypoint_id_style(self) -> Dict[str, Any]:
+        """
+        Get the text properties of the ID of a waypoint, used on the map as well as in the legend.
+
+        :return: Keyword arguments for a text drawing the ID.
+        :rtype: dict
+        """
+        return dict(
+            color=self.style.sign,
+            bbox=dict(boxstyle="circle,pad=0.25", fc="white", ec=self.style.sign),
+            fontsize=7,
+        )
+
     def _add_legend(
-        ax: Axes, handles: Sequence[LegendEntry], title: Optional[str] = None
+        self, ax: Axes, handles: Sequence[Artist], title: Optional[str] = None
     ) -> None:
         """
         Add a legend to the right of the map, outside of the plotted area.
 
-        An entry that consists of several artists is drawn as those artists on top of each other, its label is taken
-        from the last one.
+        A text handle is drawn as that text, so that the IDs of the waypoints look the same on the map and in the
+        legend.
 
         :param ax: Axes of the map.
         :type ax: matplotlib.axes.Axes
         :param handles: Legend entries.
-        :type handles: list[matplotlib.artist.Artist or tuple[matplotlib.artist.Artist, ...]]
+        :type handles: list[matplotlib.artist.Artist]
         :param title: Title of the legend.
         :type title: str, optional
         """
-        entries = list(handles)
-        labels = [
-            (entry[-1] if isinstance(entry, tuple) else entry).get_label()
-            for entry in entries
-        ]
         ax.legend(
-            handles=entries,
-            labels=labels,
-            # ndivide=1 draws the artists of an entry on top of each other instead of next to each other
-            handler_map={tuple: HandlerTuple(ndivide=1)},
+            handles=list(handles),
+            handler_map={Text: _TextHandler(self._waypoint_id_style())},
             loc="upper left",
             bbox_to_anchor=(1.02, 1),
             borderaxespad=0,
             fontsize=8,
-            # The entries of the waypoints are higher than their labels, so they need some room
-            labelspacing=0.8,
+            # The IDs in their circles are higher and wider than the text of the labels
+            handleheight=1.6,
+            handlelength=1.6,
             title=title,
             title_fontsize=8,
         )
 
     def _plot_waypoints(
         self, ax: Axes, waypoint_ids: Sequence[int], plot_route: bool
-    ) -> List[LegendEntry]:
+    ) -> List[Artist]:
         """
         Plot the waypoints with their IDs, optionally with the route from the start point through them.
 
@@ -1057,7 +1097,7 @@ class VisMap:
         :param plot_route: Flag indicating whether the route from the start point through the waypoints is plotted.
         :type plot_route: bool
         :return: Legend entries for the waypoints and, with a route, for the start point.
-        :rtype: list[matplotlib.artist.Artist or tuple[matplotlib.artist.Artist, ...]]
+        :rtype: list[matplotlib.artist.Artist]
         """
         waypoints = [self.all_wp_dict[waypoint_id] for waypoint_id in waypoint_ids]
         if plot_route:
@@ -1120,11 +1160,9 @@ class VisMap:
                 # Aligned so that the ID extends away from the sign
                 ha=("right", "center", "left")[round(label_x) + 1],
                 va=("top", "center", "bottom")[round(label_y) + 1],
-                color=self.style.sign,
-                bbox=dict(boxstyle="circle,pad=0.25", fc="white", ec=self.style.sign),
-                fontsize=7,
+                **self._waypoint_id_style(),
             )
-        handles: List[LegendEntry] = [
+        handles: List[Artist] = [
             self._waypoint_handle(waypoint_id, wp)
             for waypoint_id, wp in zip(waypoint_ids, waypoints)
         ]
@@ -1142,41 +1180,24 @@ class VisMap:
             )
         return handles
 
-    def _waypoint_handle(self, waypoint_id: int, wp: Waypoint) -> Tuple[Artist, ...]:
+    @staticmethod
+    def _waypoint_handle(waypoint_id: int, wp: Waypoint) -> Text:
         """
-        Create the legend entry of a waypoint, the ID in a circle as on the map and the parameters as label.
+        Create the legend entry of a waypoint, its ID as handle and its parameters as label.
+
+        The handle is drawn by :class:`_TextHandler`, which gives it the same appearance as the ID on the map.
 
         :param waypoint_id: ID of the waypoint.
         :type waypoint_id: int
         :param wp: The waypoint.
         :type wp: Waypoint
-        :return: Circle and ID of the waypoint, to be drawn on top of each other.
-        :rtype: tuple[matplotlib.artist.Artist, ...]
+        :return: Legend entry of the waypoint.
+        :rtype: matplotlib.text.Text
         """
-        digits = len(str(waypoint_id))
         label = f"C = {wp.c}"
         if wp.alpha is not None:
             label += f", $\\alpha$ = {wp.alpha}$^\\circ$"
-        circle = Line2D(
-            [],
-            [],
-            marker="o",
-            linestyle="none",
-            markerfacecolor="white",
-            markeredgecolor=self.style.sign,
-            markersize=10.5 + 2.5 * (digits - 1),
-        )
-        # The ID is rendered upright, as the text on the map, not in the italic default math font
-        number = Line2D(
-            [],
-            [],
-            marker=f"$\\mathrm{{{waypoint_id}}}$",
-            linestyle="none",
-            color=self.style.sign,
-            markersize=6,
-            label=label,
-        )
-        return circle, number
+        return Text(text=str(waypoint_id), label=label)
 
     def create_aset_map_plot(
         self,
@@ -1184,14 +1205,12 @@ class VisMap:
         plot_obstructions: bool = False,
         flip_y_axis: bool = True,
         ax: Optional[Axes] = None,
-        legend: bool = True,
     ) -> FigureAxes:
         """
         Create a plot visualizing the ASET map (Available Safe Egress Time) map indicating for each cell the first time any waypoint is not visible.
 
         The color scale ``style.aset_cmap`` runs from 0 to the maximum time. Cells from which no waypoint is visible
-        at any time point up to the maximum time are drawn in ``style.never_visible`` and described by a legend to
-        the right of the map.
+        at any time point up to the maximum time are drawn in ``style.never_visible``.
 
         :param max_time: The maximum time value to consider for the ASET calculations. If None, it defaults to the last time in the visibility data.
         :type max_time: float, optional
@@ -1201,8 +1220,6 @@ class VisMap:
         :type flip_y_axis:  bool, Default is True.
         :param ax: Axes to plot into, e.g. a subplot. If None, a new figure is created.
         :type ax: matplotlib.axes.Axes, optional
-        :param legend: Flag indicating whether a legend is added. Default is True.
-        :type legend: bool, optional
         :return: A tuple containing the matplotlib figure and axes objects that display the ASET map.
         :rtype: (matplotlib.figure.Figure, matplotlib.axes.Axes)
         """
@@ -1230,17 +1247,6 @@ class VisMap:
             vmax=max_time,
             cbar_kwargs={"label": "Time / s"},
         )
-        if legend and never_visible.any():
-            self._add_legend(
-                ax,
-                [
-                    Patch(
-                        facecolor=self.style.never_visible,
-                        alpha=self.style.map_alpha,
-                        label="never visible",
-                    )
-                ],
-            )
         return fig, ax
 
     def create_time_agg_wp_agg_vismap_plot(
