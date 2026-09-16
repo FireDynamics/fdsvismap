@@ -285,7 +285,9 @@ class VisMap:
             raise ValueError(
                 f"No sign with the ID(s) {unknown}. Available IDs: {list(self.all_sign_dict)}"
             )
-        self.all_route_dict[route_id] = Route(waypoints=waypoints, signs=sign_ids)
+        self.all_route_dict[route_id] = Route(
+            waypoints=np.asarray(waypoints, dtype=float), signs=sign_ids
+        )
 
     def read_fds_data(
         self,
@@ -460,7 +462,9 @@ class VisMap:
 
         return extco_array
 
-    def _get_non_concealed_cells_idx(self, sign_id: int) -> Tuple[IntArray, IntArray]:
+    def _get_non_concealed_cells_idx(
+        self, sign_id: SignId
+    ) -> Tuple[IntArray, IntArray]:
         """
         Retrieve the X and Y indices of non-concealed cells for a specific sign.
 
@@ -473,7 +477,7 @@ class VisMap:
         y_idx = self.all_sign_non_concealed_cells_xy_idx_dict[sign_id][0]
         return x_idx, y_idx
 
-    def _get_mean_extco_array_at_time(self, sign_id: int, time: float) -> FloatArray:
+    def _get_mean_extco_array_at_time(self, sign_id: SignId, time: float) -> FloatArray:
         """
         Get the array of mean extinction coefficients between the sign and all non-concealed cells.
 
@@ -497,7 +501,7 @@ class VisMap:
         )
         return mean_extco_array.T
 
-    def _get_dist_array(self, sign_id: int) -> FloatArray:
+    def _get_dist_array(self, sign_id: SignId) -> FloatArray:
         """
         Get the array containing distances between the sign and all cells.
 
@@ -514,7 +518,7 @@ class VisMap:
         )
         return distance_array
 
-    def _get_view_angle_array(self, sign_id: int) -> FloatArray:
+    def _get_view_angle_array(self, sign_id: SignId) -> FloatArray:
         """
         Get the view array considering view angles.
 
@@ -623,7 +627,7 @@ class VisMap:
             self.all_sign_distance_array_dict[sign_id] = self._get_dist_array(sign_id)
             self._build_ray_casting_cache(sign_id)
 
-    def _build_ray_casting_cache(self, sign_id: int) -> None:
+    def _build_ray_casting_cache(self, sign_id: SignId) -> None:
         """
         Pre-compute and cache ray casting data for a sign.
 
@@ -664,7 +668,7 @@ class VisMap:
         }
 
     def _get_non_concealed_cells_array(
-        self, sign_id: int, aa: bool = True
+        self, sign_id: SignId, aa: bool = True
     ) -> BoolArray:
         """
         Compute the non_concealed_cells array indicating obstructed cells relative to a certain sign.
@@ -732,7 +736,7 @@ class VisMap:
         # non_concealed_cells_array = non_concealed_cells_array.T
         return non_concealed_cells_array
 
-    def _get_visibility_array(self, sign_id: int, time: float) -> FloatArray:
+    def _get_visibility_array(self, sign_id: SignId, time: float) -> FloatArray:
         """
         Calculate the visibility array for a specific sign at a given time.
 
