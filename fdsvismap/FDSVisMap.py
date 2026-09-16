@@ -23,20 +23,23 @@ import matplotlib.ticker as mticker
 import numpy as np
 from matplotlib.artist import Artist
 from matplotlib.axes import Axes
+from matplotlib.collections import LineCollection
 from matplotlib.figure import Figure
 from matplotlib.legend_handler import HandlerBase
 from matplotlib.lines import Line2D
 from matplotlib.text import Text
-from numpy.typing import NDArray
+from numpy.typing import ArrayLike, NDArray
 from skimage.draw import line, line_aa
 
 from fdsvismap.helper_functions import (
     count_cells_to_obstruction,
     get_id_of_closest_value,
+    get_ids_of_closest_values,
     progress_bar,
 )
 from fdsvismap.MapStyle import MapStyle
-from fdsvismap.Waypoint import Waypoint
+from fdsvismap.Route import Route
+from fdsvismap.Sign import Sign
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +50,8 @@ IntArray = NDArray[np.intp]  # platform-index-sized int
 Int32Array = NDArray[np.int32]
 ExtCoArray = FloatArray  # extinction coefficient is float
 FigureAxes = Tuple[Figure, Axes]
+SignId = Union[int, str]
+RouteId = Union[int, str]
 
 
 class _TextHandler(HandlerBase):
@@ -99,6 +104,12 @@ class VisMap:
     """
     A class to build visibility maps (VisMap) based on Fire Dynamics Simulator (FDS) data.
 
+    One instance holds the smoke field, the obstructions, all safety signs and all routes of egress. A sign has a
+    position, one viewing direction and a contrast factor, its visibility map does not depend on any route and is
+    computed only once (:meth:`add_sign`). A route is a polyline of waypoints together with the signs that guide
+    along it, which do not have to lie on it (:meth:`add_route`). From that follow the maps of a route and its
+    coverage, the share of its length from which a sign is visible (:meth:`get_route_coverage`).
+
     :ivar obstructions_array: Array indicating obstructed cells in the FDS simulation. Initialized as None.
     :vartype obstruction_array: np.ndarray or None
     :ivar fds_grid_shape: Shape of the FDS grid. Initialized as None.
@@ -117,22 +128,22 @@ class VisMap:
     :vartype quantity: str
     :ivar slc: Slice object for visibility calculations. Initialized as None.
     :vartype slc: fds.Simulation.Slice or None
-    :ivar start_point: The starting point coordinates (x, y) for the route of egress. Initialized as None.
-    :vartype start_point: tuple[float, float] or None
-    :ivar all_wp_dict: Dictionary of waypoints for the path. Initialized as an empty list.
-    :vartype all_wp_dict: dict[Waypoint]
-    :ivar all_wp_distance_array_dict: Dictionary of distance arrays between each waypoint and all cells. Initialized as an empty list.
-    :vartype all_wp_distance_array_list: dicts[np.ndarray]
-    :ivar all_wp_non_concealed_cells_array_dict: Dictionary of arrays indicating non-concealed cells for each waypoint. Initialized as an empty list.
-    :vartype all_wp_non_concealed_cells_array_dict: dict[np.ndarray]
-    :ivar all_wp_angle_array_dict: Dictionary of arrays representing the cosine of the angle of view for each waypoint. Initialized as an empty list.
-    :vartype all_wp_angle_array_dict: dict[np.ndarray]
-    :ivar all_time_all_wp_vismap_array_list: List of visibility maps for all waypoints at all times. Initialized as an empty list.
-    :vartype all_time_all_wp_vismap_array_list: list[list[np.ndarray]]
-    :ivar all_wp_non_concealed_cells_xy_idx_dict: Dictionary of indices of non-concealed cells for each waypoint. Initialized as an empty list.
-    :vartype all_wp_non_concealed_cells_xy_idx_dict: dict[tuple[np.ndarray, np.ndarray]]
-    :ivar all_wp_ray_casting_cache_dict: Dictionary storing pre-computed ray casting data (flat indices of the cells along all rays, start index and cell count of each ray) for each waypoint. Initialized as an empty dict.
-    :vartype all_wp_ray_casting_cache_dict: dict[int, RayCastingCache]
+    :ivar all_sign_dict: Dictionary of all signs by their ID. Initialized as an empty dict.
+    :vartype all_sign_dict: dict[int or str, Sign]
+    :ivar all_route_dict: Dictionary of all routes by their ID. Initialized as an empty dict.
+    :vartype all_route_dict: dict[int or str, Route]
+    :ivar all_sign_distance_array_dict: Dictionary of distance arrays between each sign and all cells. Initialized as an empty list.
+    :vartype all_sign_distance_array_dict: dicts[np.ndarray]
+    :ivar all_sign_non_concealed_cells_array_dict: Dictionary of arrays indicating non-concealed cells for each sign. Initialized as an empty list.
+    :vartype all_sign_non_concealed_cells_array_dict: dict[np.ndarray]
+    :ivar all_sign_angle_array_dict: Dictionary of arrays representing the cosine of the angle of view for each sign. Initialized as an empty list.
+    :vartype all_sign_angle_array_dict: dict[np.ndarray]
+    :ivar all_time_all_sign_vismap_list: List of visibility maps for all signs at all times. Initialized as an empty list.
+    :vartype all_time_all_sign_vismap_list: list[list[np.ndarray]]
+    :ivar all_sign_non_concealed_cells_xy_idx_dict: Dictionary of indices of non-concealed cells for each sign. Initialized as an empty list.
+    :vartype all_sign_non_concealed_cells_xy_idx_dict: dict[tuple[np.ndarray, np.ndarray]]
+    :ivar all_sign_ray_casting_cache_dict: Dictionary storing pre-computed ray casting data (flat indices of the cells along all rays, start index and cell count of each ray) for each sign. Initialized as an empty dict.
+    :vartype all_sign_ray_casting_cache_dict: dict[int, RayCastingCache]
     :ivar min_vis: Minimum local visibility threshold to meet performance criteria. Initialized to 0.
     :vartype min_vis: float
     :ivar max_vis: Maximum visibility threshold. Initialized to 30.
@@ -145,8 +156,8 @@ class VisMap:
     :vartype background_extent: tuple[float, float, float, float] or None
     :ivar style: Colors and opacities of all plots of this instance.
     :vartype style: MapStyle
-    :ivar all_time_wp_agg_vismap_list: List of waypoint-aggregated visibility maps for all time steps. Initialized as an empty list.
-    :vartype all_time_wp_agg_vismap_list: list[np.ndarray]
+    :ivar all_time_sign_agg_vismap_list: List of sign-aggregated visibility maps for all time steps. Initialized as an empty list.
+    :vartype all_time_sign_agg_vismap_list: list[np.ndarray]
     :ivar num_edge_cells: Number of edge cells considered for collision detection. Initialized to 1.
     :vartype num_edge_cells: int
     """
@@ -156,24 +167,24 @@ class VisMap:
         self.obstructions_array: BoolArray = np.array([], dtype=bool)
         self.vismap_time_points: FloatArray = np.array([], dtype=float)
         self.quantity: str = "ext_coef_C0.9H0.1"
-        self.start_point: Tuple[float, float] = (0.0, 0.0)
-        self.all_wp_dict: Dict[int, Waypoint] = {}
-        self.all_wp_distance_array_dict: Dict[int, FloatArray] = {}
-        self.all_wp_non_concealed_cells_array_dict: Dict[
-            int, Union[BoolArray, int]
+        self.all_sign_dict: Dict[SignId, Sign] = {}
+        self.all_route_dict: Dict[RouteId, Route] = {}
+        self.all_sign_distance_array_dict: Dict[SignId, FloatArray] = {}
+        self.all_sign_non_concealed_cells_array_dict: Dict[
+            SignId, Union[BoolArray, int]
         ] = {}
-        self.all_wp_angle_array_dict: Dict[int, Union[FloatArray, int]] = {}
-        self.all_time_all_wp_vismap_array_list: List[List[BoolArray]] = []
-        self.all_wp_non_concealed_cells_xy_idx_dict: Dict[
-            int, Tuple[IntArray, IntArray]
+        self.all_sign_angle_array_dict: Dict[SignId, Union[FloatArray, int]] = {}
+        self.all_time_all_sign_vismap_list: List[List[BoolArray]] = []
+        self.all_sign_non_concealed_cells_xy_idx_dict: Dict[
+            SignId, Tuple[IntArray, IntArray]
         ] = {}
-        self.all_wp_ray_casting_cache_dict: Dict[int, RayCastingCache] = {}
+        self.all_sign_ray_casting_cache_dict: Dict[SignId, RayCastingCache] = {}
         self.min_vis: float = 0.0
         self.max_vis: float = 30
         self.background_image: np.ndarray = np.array([])
         self.background_extent: Optional[Tuple[float, float, float, float]] = None
         self.style: MapStyle = MapStyle()
-        self.all_time_wp_agg_vismap_list: List[BoolArray] = []
+        self.all_time_sign_agg_vismap_list: List[BoolArray] = []
         self.num_edge_cells: int = 1
         self._t_max_computed: Optional[float] = None
 
@@ -217,40 +228,64 @@ class VisMap:
         self.min_vis = min_vis
         self.max_vis = max_vis
 
-    def set_start_point(self, x: float, y: float) -> None:
-        """
-        Set the starting point for the route of egress.
-
-        :param x: x-coordinate of the starting point referring to global FDS coordinates.
-        :type x: float
-        :param y: y-coordinate of the starting point referring to global FDS coordinates.
-        :type y: float
-        """
-        self.start_point = (x, y)
-
-    def set_waypoint(
+    def add_sign(
         self,
-        waypoint_id: int,
+        sign_id: SignId,
         x: float,
         y: float,
-        c: int,
-        alpha: int,
+        c: float,
+        alpha: Union[float, None, Literal["omni"]],
     ) -> None:
         """
-        Add a waypoint along the route of egress.
+        Add a safety sign, whose visibility is evaluated independently of the routes it belongs to.
 
-        :param waypoint_id: ID of the waypoint to add to the route.
-        :type waypoint_id: int
-        :param x: x-coordinate of the waypoint referring to global FDS coordinates.
+        A sign has exactly one viewing direction, given in the global coordinate system. A sign that two routes
+        approach from different sides is added twice, once per viewing direction.
+
+        :param sign_id: ID of the sign, a number or a name such as ``"NA-NO"``.
+        :type sign_id: int or str
+        :param x: x-coordinate of the sign referring to global FDS coordinates.
         :type x: float
-        :param y: y-coordinate of the waypoint referring to global FDS coordinates.
+        :param y: y-coordinate of the sign referring to global FDS coordinates.
         :type y: float
-        :param c: Contrast factor for exit sign according to Jin.
-        :type c: int
-        :param alpha: Orientation angle of the exit sign according to global FDS coordinates.
-        :type alpha: int
+        :param c: Contrast factor of the sign according to Jin.
+        :type c: float
+        :param alpha: Orientation angle of the sign according to global FDS coordinates, measured clockwise from the
+                      positive y-axis. ``"omni"`` or None for a sign that is visible from all directions.
+        :type alpha: float or None or str
         """
-        self.all_wp_dict[waypoint_id] = Waypoint(x, y, c, alpha)
+        self.all_sign_dict[sign_id] = Sign(
+            x, y, c, None if alpha == "omni" else cast(Optional[float], alpha)
+        )
+
+    def add_route(
+        self,
+        route_id: RouteId,
+        waypoints: ArrayLike,
+        signs: Optional[Sequence[SignId]] = None,
+    ) -> None:
+        """
+        Add a route of egress as a polyline of waypoints, together with the signs that guide along it.
+
+        The route does not have to pass the signs, it is enough to see them. A sign may belong to several routes,
+        its visibility map is computed only once.
+
+        :param route_id: ID of the route, a number or a name such as ``"B2"``.
+        :type route_id: int or str
+        :param waypoints: Waypoints of the route as (x, y) pairs in global FDS coordinates, the first one is the
+                          starting point.
+        :type waypoints: array_like
+        :param signs: IDs of the signs that belong to the route. If None, all signs added so far belong to it.
+        :type signs: list[int or str], optional
+        :raises ValueError: If the route has less than two waypoints or a sign is unknown.
+        """
+        sign_ids = list(self.all_sign_dict) if signs is None else list(signs)
+        unknown = [sign_id for sign_id in sign_ids if sign_id not in self.all_sign_dict]
+        if unknown:
+            raise ValueError(
+                f"No sign with the ID(s) {unknown}. Available IDs: {list(self.all_sign_dict)}"
+            )
+        self.all_route_dict[route_id] = Route(waypoints=waypoints, signs=sign_ids)
 
     def read_fds_data(
         self,
@@ -425,29 +460,25 @@ class VisMap:
 
         return extco_array
 
-    def _get_non_concealed_cells_idx(
-        self, waypoint_id: int
-    ) -> Tuple[IntArray, IntArray]:
+    def _get_non_concealed_cells_idx(self, sign_id: int) -> Tuple[IntArray, IntArray]:
         """
-        Retrieve the X and Y indices of non-concealed cells for a specific waypoint.
+        Retrieve the X and Y indices of non-concealed cells for a specific sign.
 
-        :param waypoint_id: Index of the waypoint for which to retrieve non-concealed cell indices.
-        :type waypoint_id: int
+        :param sign_id: ID of the sign for which to retrieve non-concealed cell indices.
+        :type sign_id: int or str
         :return: Tuple of arrays (x_indices, y_indices) representing the X and Y indices of non-concealed cells.
         :rtype: tuple[np.ndarray, np.ndarray]
         """
-        x_idx = self.all_wp_non_concealed_cells_xy_idx_dict[waypoint_id][1]
-        y_idx = self.all_wp_non_concealed_cells_xy_idx_dict[waypoint_id][0]
+        x_idx = self.all_sign_non_concealed_cells_xy_idx_dict[sign_id][1]
+        y_idx = self.all_sign_non_concealed_cells_xy_idx_dict[sign_id][0]
         return x_idx, y_idx
 
-    def _get_mean_extco_array_at_time(
-        self, waypoint_id: int, time: float
-    ) -> FloatArray:
+    def _get_mean_extco_array_at_time(self, sign_id: int, time: float) -> FloatArray:
         """
-        Get the array of mean extinction coefficients between the waypoint and all non-concealed cells.
+        Get the array of mean extinction coefficients between the sign and all non-concealed cells.
 
-        :param waypoint_id: Index of the waypoint for which to calculate the mean extinction coefficients.
-        :type waypoint_id: int
+        :param sign_id: ID of the sign for which to calculate the mean extinction coefficients.
+        :type sign_id: int or str
         :param time: Time at which the extinction coefficients should be calculated.
         :type time: float
         :return: A 2D numpy array with the mean extinction coefficients at the specified time, transposed for correct orientation.
@@ -456,7 +487,7 @@ class VisMap:
         extco_array = self.get_extco_array_at_time(time)
         mean_extco_array = np.zeros_like(extco_array)
 
-        cache = self.all_wp_ray_casting_cache_dict[waypoint_id]
+        cache = self.all_sign_ray_casting_cache_dict[sign_id]
         # Sum up the extinction coefficients along all rays at once, each ray is a segment of the flat index array
         ray_extco_sums = np.add.reduceat(
             extco_array.ravel()[cache["ray_cells_flat_idx"]], cache["ray_start_idx"]
@@ -466,43 +497,43 @@ class VisMap:
         )
         return mean_extco_array.T
 
-    def _get_dist_array(self, waypoint_id: int) -> FloatArray:
+    def _get_dist_array(self, sign_id: int) -> FloatArray:
         """
-        Get the array containing distances between the waypoint and all cells.
+        Get the array containing distances between the sign and all cells.
 
-        :param waypoint_id: The index of the waypoint from which distances are to be calculated.
-        :type waypoint_id: int
-        :return: A 2D numpy array where each element represents the distance from the specified waypoint to that cell.
+        :param sign_id: The ID of the sign from which distances are to be calculated.
+        :type sign_id: int or str
+        :return: A 2D numpy array where each element represents the distance from the specified sign to that cell.
         :rtype: np.ndarray
         """
-        wp = self.all_wp_dict[waypoint_id]
+        sign = self.all_sign_dict[sign_id]
         self.xv, self.yv = np.meshgrid(self.all_x_coords, self.all_y_coords)
         distance_array: FloatArray = cast(
             FloatArray,
-            np.linalg.norm(np.array([self.xv - wp.x, self.yv - wp.y]), axis=0),
+            np.linalg.norm(np.array([self.xv - sign.x, self.yv - sign.y]), axis=0),
         )
         return distance_array
 
-    def _get_view_angle_array(self, waypoint_id: int) -> FloatArray:
+    def _get_view_angle_array(self, sign_id: int) -> FloatArray:
         """
         Get the view array considering view angles.
 
-        :param waypoint_id: The index of the waypoint for which view angles are to be calculated.
-        :type waypoint_id: int
-        :return: A 2D numpy array with the cosine values of the view angles from the waypoint to each cell.
-                 A cell at the position of the waypoint itself (distance 0) gets the value 1.
+        :param sign_id: The ID of the sign for which view angles are to be calculated.
+        :type sign_id: int or str
+        :return: A 2D numpy array with the cosine values of the view angles from the sign to each cell.
+                 A cell at the position of the sign itself (distance 0) gets the value 1.
         :rtype: np.ndarray
         """
-        distance_array = self._get_dist_array(waypoint_id)
-        wp = self.all_wp_dict[waypoint_id]
+        distance_array = self._get_dist_array(sign_id)
+        sign = self.all_sign_dict[sign_id]
         view_angle_array: FloatArray
-        if wp.alpha is not None:
+        if sign.alpha is not None:
             view_angle_array = cast(
                 FloatArray,
                 np.clip(
                     np.divide(
-                        np.sin(np.deg2rad(wp.alpha)) * (self.xv - wp.x)
-                        + np.cos(np.deg2rad(wp.alpha)) * (self.yv - wp.y),
+                        np.sin(np.deg2rad(sign.alpha)) * (self.xv - sign.x)
+                        + np.cos(np.deg2rad(sign.alpha)) * (self.yv - sign.y),
                         distance_array,
                         out=np.ones_like(distance_array, dtype=np.float64),
                         where=distance_array > 0,
@@ -555,63 +586,61 @@ class VisMap:
 
         :param obstructions: Flag indicating whether to consider cells being concealed by obstructions.
         :type obstructions: bool
-        :param view_angle: Flag indicating whether to consider view angles from each waypoint.
+        :param view_angle: Flag indicating whether to consider view angles from each sign.
         :type view_angle: bool
         :param aa: Flag indicating whether antialiasing should be used in the calculation of line-of-sight paths, affecting the smoothness of boundaries.
         :type aa: bool, optional
-        :param progress: Flag indicating whether a progress bar over the waypoints is shown. Default is False.
+        :param progress: Flag indicating whether a progress bar over the signs is shown. Default is False.
         :type progress: bool, optional
         """
-        for waypoint_id in progress_bar(
-            self.all_wp_dict.keys(), progress, "Preparing waypoints"
+        for sign_id in progress_bar(
+            self.all_sign_dict.keys(), progress, "Preparing signs"
         ):
-            logger.debug("Preparing waypoint %s", waypoint_id)
+            logger.debug("Preparing sign %s", sign_id)
             if obstructions:
                 non_concealed_cells_array = self._get_non_concealed_cells_array(
-                    waypoint_id, aa
+                    sign_id, aa
                 )
-                self.all_wp_non_concealed_cells_array_dict[waypoint_id] = (
+                self.all_sign_non_concealed_cells_array_dict[sign_id] = (
                     non_concealed_cells_array
                 )
-                self.all_wp_non_concealed_cells_xy_idx_dict[waypoint_id] = cast(
+                self.all_sign_non_concealed_cells_xy_idx_dict[sign_id] = cast(
                     Tuple[IntArray, IntArray], np.where(non_concealed_cells_array)
                 )
             else:
-                self.all_wp_non_concealed_cells_array_dict[waypoint_id] = 1
-                self.all_wp_non_concealed_cells_xy_idx_dict[waypoint_id] = cast(
+                self.all_sign_non_concealed_cells_array_dict[sign_id] = 1
+                self.all_sign_non_concealed_cells_xy_idx_dict[sign_id] = cast(
                     Tuple[IntArray, IntArray],
                     np.where(np.ones_like(self.obstructions_array, dtype=bool)),
                 )
             if view_angle:
-                self.all_wp_angle_array_dict[waypoint_id] = self._get_view_angle_array(
-                    waypoint_id
+                self.all_sign_angle_array_dict[sign_id] = self._get_view_angle_array(
+                    sign_id
                 )
             else:
-                self.all_wp_angle_array_dict[waypoint_id] = 1
+                self.all_sign_angle_array_dict[sign_id] = 1
 
-            self.all_wp_distance_array_dict[waypoint_id] = self._get_dist_array(
-                waypoint_id
-            )
-            self._build_ray_casting_cache(waypoint_id)
+            self.all_sign_distance_array_dict[sign_id] = self._get_dist_array(sign_id)
+            self._build_ray_casting_cache(sign_id)
 
-    def _build_ray_casting_cache(self, waypoint_id: int) -> None:
+    def _build_ray_casting_cache(self, sign_id: int) -> None:
         """
-        Pre-compute and cache ray casting data for a waypoint.
+        Pre-compute and cache ray casting data for a sign.
 
-        Stores the cells along the rays to all non-concealed cells relative to a waypoint as flat indices of the
+        Stores the cells along the rays to all non-concealed cells relative to a sign as flat indices of the
         (nx, ny) extinction coefficient array in one int32 array, together with the start index and cell count of
         each ray. This avoids recalculating ray paths at every timestep.
 
-        :param waypoint_id: The index of the waypoint for which to build the cache.
-        :type waypoint_id: int
+        :param sign_id: The ID of the sign for which to build the cache.
+        :type sign_id: int or str
         """
-        wp = self.all_wp_dict[waypoint_id]
-        ref_x_id = get_id_of_closest_value(self.all_x_coords, wp.x)
-        ref_y_id = get_id_of_closest_value(self.all_y_coords, wp.y)
+        sign = self.all_sign_dict[sign_id]
+        ref_x_id = get_id_of_closest_value(self.all_x_coords, sign.x)
+        ref_y_id = get_id_of_closest_value(self.all_y_coords, sign.y)
         n_y = len(self.all_y_coords)
 
         non_concealed_x_idx, non_concealed_y_idx = self._get_non_concealed_cells_idx(
-            waypoint_id
+            sign_id
         )
 
         ray_paths: List[Int32Array] = []
@@ -626,7 +655,7 @@ class VisMap:
         ray_start_idx = np.zeros_like(ray_cell_counts)
         ray_start_idx[1:] = np.cumsum(ray_cell_counts)[:-1]
 
-        self.all_wp_ray_casting_cache_dict[waypoint_id] = {
+        self.all_sign_ray_casting_cache_dict[sign_id] = {
             "ray_cells_flat_idx": ray_cells_flat_idx,
             "ray_start_idx": ray_start_idx,
             "ray_cell_counts": ray_cell_counts,
@@ -635,27 +664,27 @@ class VisMap:
         }
 
     def _get_non_concealed_cells_array(
-        self, waypoint_id: int, aa: bool = True
+        self, sign_id: int, aa: bool = True
     ) -> BoolArray:
         """
-        Compute the non_concealed_cells array indicating obstructed cells relative to a certain waypoint.
+        Compute the non_concealed_cells array indicating obstructed cells relative to a certain sign.
 
-        :param waypoint_id: The index of the waypoint from where concealed and unconcealed cells are determined.
-        :type waypoint_id: int
+        :param sign_id: The ID of the sign from where concealed and unconcealed cells are determined.
+        :type sign_id: int or str
         :param aa: Flag indicating whether antialiasing should be used in the line drawing process. Antialiasing can improve
                    the visual quality of the line by smoothing jagged edges but may affect performance. Default is True.
         :type aa: bool, optional
-        :return: A 2D boolean array where True indicates that the cell is visible (non-obstructed) from the waypoint.
+        :return: A 2D boolean array where True indicates that the cell is visible (non-obstructed) from the sign.
         :rtype: np.ndarray
         """
-        # Retrieve the coordinates for the target waypoint
-        wp = self.all_wp_dict[waypoint_id]
+        # Retrieve the coordinates for the target sign
+        sign = self.all_sign_dict[sign_id]
 
-        # Find the closest grid coordinates to the target waypoint
+        # Find the closest grid coordinates to the target sign
         closest_y_id = get_id_of_closest_value(
-            self.all_x_coords, wp.x
+            self.all_x_coords, sign.x
         )  # TODO: fix x / y coordinates switch
-        closest_x_id = get_id_of_closest_value(self.all_y_coords, wp.y)
+        closest_x_id = get_id_of_closest_value(self.all_y_coords, sign.y)
 
         # Initialize arrays for the final visibility matrix, buffer matrix, and edge cell identification
         non_concealed_cells_array = np.zeros_like(self.obstructions_array)
@@ -703,21 +732,21 @@ class VisMap:
         # non_concealed_cells_array = non_concealed_cells_array.T
         return non_concealed_cells_array
 
-    def _get_visibility_array(self, waypoint_id: int, time: float) -> FloatArray:
+    def _get_visibility_array(self, sign_id: int, time: float) -> FloatArray:
         """
-        Calculate the visibility array for a specific waypoint at a given time.
+        Calculate the visibility array for a specific sign at a given time.
 
-        :param waypoint_id: The index of the waypoint for which the visibility map is to be calculated.
-        :type waypoint_id: int
+        :param sign_id: The ID of the sign for which the visibility map is to be calculated.
+        :type sign_id: int or str
         :param time: The simulation time at which to evaluate visibility.
         :type time: float
-        :return: A 2D numpy array representing the visibility (m) from the waypoint along the line of sight relative to each cell.
+        :return: A 2D numpy array representing the visibility (m) from the sign along the line of sight relative to each cell.
         :rtype: np.ndarray
         """
-        wp = self.all_wp_dict[waypoint_id]
-        mean_extco_array = self._get_mean_extco_array_at_time(waypoint_id, time)
+        sign = self.all_sign_dict[sign_id]
+        mean_extco_array = self._get_mean_extco_array_at_time(sign_id, time)
         vis_array = np.divide(
-            wp.c,
+            sign.c,
             mean_extco_array,
             out=np.full_like(mean_extco_array, self.max_vis),
             where=mean_extco_array != 0,
@@ -727,24 +756,23 @@ class VisMap:
         )
         return vismap
 
-    def get_vismap(self, waypoint_id: int, time: float) -> BoolArray:
+    def get_sign_vismap(self, sign_id: SignId, time: float) -> BoolArray:
         """
-        Generate a boolean  vismap for a specific waypoint at a given time.
+        Generate the boolean vismap of a single sign at a given time, independently of any route.
 
-        :param waypoint_id: The index of the waypoint for which the visibility map is to be calculated.
-        :type waypoint_id: int
+        :param sign_id: ID of the sign for which the visibility map is to be calculated.
+        :type sign_id: int or str
         :param time: The simulation time at which to evaluate visibility.
         :type time: float
-        :return: Boolean vismap indicating whether the waypoint can be seen (True) from a specific  cell or not (False).
+        :return: Boolean vismap indicating whether the sign can be seen (True) from a specific cell or not (False).
         :rtype: np.ndarray
-
         """
-        non_concealed_cells_array = self.all_wp_non_concealed_cells_array_dict[
-            waypoint_id
+        non_concealed_cells_array = self.all_sign_non_concealed_cells_array_dict[
+            sign_id
         ]
-        view_angle_array = self.all_wp_angle_array_dict[waypoint_id]
-        visibility_array = self._get_visibility_array(waypoint_id, time)
-        distance_array = self.all_wp_distance_array_dict[waypoint_id]
+        view_angle_array = self.all_sign_angle_array_dict[sign_id]
+        visibility_array = self._get_visibility_array(sign_id, time)
+        distance_array = self.all_sign_distance_array_dict[sign_id]
 
         visibility_array_total = (
             view_angle_array * visibility_array * non_concealed_cells_array
@@ -761,48 +789,87 @@ class VisMap:
                 f"Re-run compute_all() with a higher t_max."
             )
 
-    def get_wp_agg_vismap(self, time: float) -> BoolArray:
+    def get_agg_vismap(
+        self, time: float, route_id: Optional[RouteId] = None
+    ) -> BoolArray:
         """
-        Get a waypoint aggregated bool type visibility map for a specific point in time.
+        Get the boolean visibility map at a point in time, aggregated over the signs of a route or over all signs.
+
+        A cell is True if at least one of the signs is visible from it.
 
         :param time: Timestep for which to calculate the visibility map.
         :type time: float
-        :raises ValueError: If ``time`` exceeds the maximum time computed by :meth:`compute_all`.
-        :return: Waypoint aggregated bool type visibility map.
+        :param route_id: ID of the route whose signs are aggregated. If None, all signs are aggregated.
+        :type route_id: int or str, optional
+        :raises ValueError: If ``time`` exceeds the maximum time computed by :meth:`compute_all` or there is no
+                            route with this ID.
+        :return: Aggregated boolean visibility map of the shape (ny, nx).
         :rtype: np.ndarray
         """
         self._check_time_in_computed_range(time)
         time_id = get_id_of_closest_value(self.vismap_time_points, time)
-        return self.all_time_wp_agg_vismap_list[time_id]
+        if route_id is None:
+            return self.all_time_sign_agg_vismap_list[time_id]
+        return self._aggregate_signs(time_id, self._get_route(route_id).signs)
 
-    def get_time_agg_wp_agg_vismap(self, t_max: Optional[float] = None) -> BoolArray:
+    def _aggregate_signs(self, time_id: int, sign_ids: Sequence[SignId]) -> BoolArray:
         """
-        Get a time-aggregated and waypoint-aggregated boolean visibility map.
+        Aggregate the computed vismaps of several signs at one time point.
+
+        :param time_id: Position of the time point in the computed time points.
+        :type time_id: int
+        :param sign_ids: IDs of the signs to aggregate.
+        :type sign_ids: list[int or str]
+        :return: Boolean map that is True where at least one of the signs is visible.
+        :rtype: np.ndarray
+        """
+        vismaps = [
+            self.all_time_all_sign_vismap_list[time_id][
+                self._get_sign_position(sign_id)
+            ]
+            for sign_id in sign_ids
+        ]
+        if not vismaps:
+            return np.zeros_like(self.obstructions_array, dtype=bool)
+        return cast(BoolArray, np.logical_or.reduce(vismaps))
+
+    def get_time_agg_vismap(
+        self, t_max: Optional[float] = None, route_id: Optional[RouteId] = None
+    ) -> BoolArray:
+        """
+        Get the boolean visibility map aggregated over time and over the signs of a route or over all signs.
+
+        A cell is True if at least one of the signs is visible from it at every time point.
 
         :param t_max: The maximum time to consider. If not specified, all computed time points are used.
                       Must not exceed the value of ``t_max`` passed to :meth:`compute_all`.
         :type t_max: float, optional
-        :raises ValueError: If ``t_max`` exceeds the maximum time computed by :meth:`compute_all`.
-        :return: Time-aggregated and waypoint-aggregated boolean visibility map.
-        :rtype: BoolArray
+        :param route_id: ID of the route whose signs are aggregated. If None, all signs are aggregated.
+        :type route_id: int or str, optional
+        :raises ValueError: If ``t_max`` exceeds the maximum time computed by :meth:`compute_all` or there is no
+                            route with this ID.
+        :return: Time-aggregated boolean visibility map of the shape (ny, nx).
+        :rtype: np.ndarray
         """
         if t_max is not None:
             self._check_time_in_computed_range(t_max)
         maps = [
-            wp_agg_vismap
-            for time, wp_agg_vismap in zip(
-                self.vismap_time_points, self.all_time_wp_agg_vismap_list
-            )
+            self.get_agg_vismap(time, route_id)
+            for time in self.vismap_time_points
             if t_max is None or time <= t_max
         ]
-        return np.logical_and.reduce(maps)
+        return cast(BoolArray, np.logical_and.reduce(maps))
 
-    def get_aset_map(self, max_time: Optional[float] = None) -> IntArray:
+    def get_aset_map(
+        self, max_time: Optional[float] = None, route_id: Optional[RouteId] = None
+    ) -> IntArray:
         """
         Generate a map indicating the earliest time at which each point becomes non-visible.
 
         :param max_time: The maximum time to consider. If None, the maximum time computed by :meth:`compute_all` is used.
         :type max_time: float, optional
+        :param route_id: ID of the route whose signs are considered. If None, all signs are considered.
+        :type route_id: int or str, optional
         :return: A 2D array where each cell represents the earliest time of non-visibility
         for the corresponding point. Cells for points that never become non-visible are set to `max_time`.
         :rtype: np.ndarray
@@ -814,12 +881,10 @@ class VisMap:
         aset_map = np.full(
             (self.fds_grid_shape[1], self.fds_grid_shape[0]), max_time, dtype=int
         )
-        for time, wp_agg_vismap in zip(
-            self.vismap_time_points, self.all_time_wp_agg_vismap_list
-        ):
+        for time in self.vismap_time_points:
             if time > max_time:
                 break
-            mask = ~wp_agg_vismap & (aset_map == max_time)
+            mask = ~self.get_agg_vismap(time, route_id) & (aset_map == max_time)
             aset_map[mask] = time
         return aset_map
 
@@ -842,21 +907,103 @@ class VisMap:
         self._check_time_in_computed_range(max_time)
         return max_time
 
-    def _get_waypoint_position(self, waypoint_id: int) -> int:
+    def _get_sign_position(self, sign_id: SignId) -> int:
         """
-        Get the position of a waypoint in the lists of computed vismaps.
+        Get the position of a sign in the lists of computed vismaps.
 
-        :param waypoint_id: ID of the waypoint.
-        :type waypoint_id: int
-        :raises ValueError: If there is no waypoint with this ID.
-        :return: Position of the waypoint in the order in which the waypoints were set.
+        :param sign_id: ID of the sign.
+        :type sign_id: int or str
+        :raises ValueError: If there is no sign with this ID.
+        :return: Position of the sign in the order in which the signs were added.
         :rtype: int
         """
-        if waypoint_id not in self.all_wp_dict:
+        if sign_id not in self.all_sign_dict:
             raise ValueError(
-                f"No waypoint with ID {waypoint_id}. Available IDs: {list(self.all_wp_dict)}"
+                f"No sign with ID {sign_id}. Available IDs: {list(self.all_sign_dict)}"
             )
-        return list(self.all_wp_dict).index(waypoint_id)
+        return list(self.all_sign_dict).index(sign_id)
+
+    def _get_route(self, route_id: RouteId) -> Route:
+        """
+        Get a route by its ID.
+
+        :param route_id: ID of the route.
+        :type route_id: int or str
+        :raises ValueError: If there is no route with this ID.
+        :return: The route.
+        :rtype: Route
+        """
+        if route_id not in self.all_route_dict:
+            raise ValueError(
+                f"No route with ID {route_id}. Available IDs: {list(self.all_route_dict)}"
+            )
+        return self.all_route_dict[route_id]
+
+    def get_route_points(self, route_id: RouteId) -> FloatArray:
+        """
+        Get the points at which a route is evaluated, sampled along its polyline in the resolution of the grid.
+
+        :param route_id: ID of the route.
+        :type route_id: int or str
+        :raises ValueError: If there is no route with this ID.
+        :return: Coordinates of the sampling points of the shape (m, 2).
+        :rtype: np.ndarray
+        """
+        return self._get_route(route_id).sample(min(self.cell_size))
+
+    def get_route_coverage(self, route_id: RouteId, time: float) -> BoolArray:
+        """
+        Get for each point of a route whether at least one sign of the route is visible from it at a point in time.
+
+        :param route_id: ID of the route.
+        :type route_id: int or str
+        :param time: Time point in seconds, rounded to the closest computed time point.
+        :type time: float
+        :raises ValueError: If there is no route with this ID or ``time`` exceeds the maximum computed time.
+        :return: Boolean array with one value per point of :meth:`get_route_points`.
+        :rtype: np.ndarray
+        """
+        return self._coverage_from_vismap(route_id, self.get_agg_vismap(time, route_id))
+
+    def _coverage_from_vismap(self, route_id: RouteId, vismap: BoolArray) -> BoolArray:
+        """
+        Look up a vismap at the points of a route.
+
+        :param route_id: ID of the route.
+        :type route_id: int or str
+        :param vismap: Boolean vismap of the shape (ny, nx).
+        :type vismap: np.ndarray
+        :return: Value of the vismap at each point of :meth:`get_route_points`.
+        :rtype: np.ndarray
+        """
+        points = self.get_route_points(route_id)
+        x_idx = get_ids_of_closest_values(self.all_x_coords, points[:, 0])
+        y_idx = get_ids_of_closest_values(self.all_y_coords, points[:, 1])
+        return cast(BoolArray, vismap[y_idx, x_idx])
+
+    def get_route_aset(
+        self, route_id: RouteId, max_time: Optional[float] = None
+    ) -> FloatArray:
+        """
+        Get for each point of a route the first time at which no sign of the route is visible from it any more.
+
+        :param route_id: ID of the route.
+        :type route_id: int or str
+        :param max_time: The maximum time to consider. If None, the maximum time computed by :meth:`compute_all`
+                         is used. Points from which a sign is visible up to this time get ``max_time``.
+        :type max_time: float, optional
+        :raises ValueError: If there is no route with this ID or ``max_time`` exceeds the maximum computed time.
+        :return: Array with one time per point of :meth:`get_route_points`.
+        :rtype: np.ndarray
+        """
+        max_time = self._get_max_time(max_time)
+        aset = np.full(len(self.get_route_points(route_id)), max_time, dtype=float)
+        for time in self.vismap_time_points:
+            if time > max_time:
+                break
+            mask = ~self.get_route_coverage(route_id, time) & (aset == max_time)
+            aset[mask] = time
+        return aset
 
     def _get_domain_extent(self) -> Tuple[float, float, float, float]:
         """
@@ -894,7 +1041,7 @@ class VisMap:
         ``ax.set_xlim`` and ``ax.set_ylim`` to show more of it. A new figure uses the compressed layout of
         matplotlib, so that legends next to the map fit into it.
 
-        :param map_array: Array of the shape (ny, nx), e.g. from :meth:`get_aset_map` or :meth:`get_wp_agg_vismap`.
+        :param map_array: Array of the shape (ny, nx), e.g. from :meth:`get_aset_map` or :meth:`get_agg_vismap`.
                           Arrays of the shape (nx, ny) such as from :meth:`get_extco_array_at_time` have to be
                           transposed with ``.T``.
         :type map_array: np.ndarray
@@ -1001,7 +1148,7 @@ class VisMap:
         colorbar: bool,
     ) -> FigureAxes:
         """
-        Plot a boolean vismap with one color for cells from which no waypoint is visible and one for the others.
+        Plot a boolean vismap with one color for cells from which no sign is visible and one for the others.
 
         The color scale is fixed to 0 and 1, so that a map without any visible cell or with only visible cells keeps
         its colors.
@@ -1036,9 +1183,9 @@ class VisMap:
             },
         )
 
-    def _waypoint_id_style(self) -> Dict[str, Any]:
+    def _sign_id_style(self) -> Dict[str, Any]:
         """
-        Get the text properties of the ID of a waypoint, used on the map as well as in the legend.
+        Get the text properties of the ID of a sign, used on the map as well as in the legend.
 
         :return: Keyword arguments for a text drawing the ID.
         :rtype: dict
@@ -1055,7 +1202,7 @@ class VisMap:
         """
         Add a legend to the right of the map, outside of the plotted area.
 
-        A text handle is drawn as that text, so that the IDs of the waypoints look the same on the map and in the
+        A text handle is drawn as that text, so that the IDs of the signs look the same on the map and in the
         legend.
 
         :param ax: Axes of the map.
@@ -1067,7 +1214,7 @@ class VisMap:
         """
         ax.legend(
             handles=list(handles),
-            handler_map={Text: _TextHandler(self._waypoint_id_style())},
+            handler_map={Text: _TextHandler(self._sign_id_style())},
             loc="upper left",
             bbox_to_anchor=(1.02, 1),
             borderaxespad=0,
@@ -1079,58 +1226,39 @@ class VisMap:
             title_fontsize=8,
         )
 
-    def _plot_waypoints(
-        self, ax: Axes, waypoint_ids: Sequence[int], plot_route: bool
-    ) -> List[Artist]:
+    def _plot_signs(self, ax: Axes, sign_ids: Sequence[SignId]) -> List[Artist]:
         """
-        Plot the waypoints with their IDs, optionally with the route from the start point through them.
+        Plot the signs with their IDs.
 
-        A waypoint is drawn as a short bar across its viewing direction with an arrow in the viewing direction and
+        A sign is drawn as a short bar across its viewing direction with an arrow in the viewing direction and
         its ID beyond the arrow, so that the ID stays in the room the sign faces. Bar, arrow and ID have fixed sizes
         in points, independent of the size of the domain. The contrast factor and the viewing angle are described by
         the returned legend entries.
 
         :param ax: Axes to plot into.
         :type ax: matplotlib.axes.Axes
-        :param waypoint_ids: IDs of the waypoints to plot.
-        :type waypoint_ids: list[int]
-        :param plot_route: Flag indicating whether the route from the start point through the waypoints is plotted.
-        :type plot_route: bool
-        :return: Legend entries for the waypoints and, with a route, for the start point.
+        :param sign_ids: IDs of the signs to plot.
+        :type sign_ids: list[int or str]
+        :return: Legend entries for the signs.
         :rtype: list[matplotlib.artist.Artist]
         """
-        waypoints = [self.all_wp_dict[waypoint_id] for waypoint_id in waypoint_ids]
-        if plot_route:
-            ax.plot(
-                [self.start_point[0], *(wp.x for wp in waypoints)],
-                [self.start_point[1], *(wp.y for wp in waypoints)],
-                color=self.style.sign,
-                linestyle="--",
-                linewidth=1,
-            )
-            ax.scatter(
-                [self.start_point[0]],
-                [self.start_point[1]],
-                facecolor=self.style.start_point_face,
-                edgecolor=self.style.start_point_edge,
-                zorder=3,
-            )
+        signs = [self.all_sign_dict[sign_id] for sign_id in sign_ids]
         # Directions on the screen: without flip_y_axis the y-axis points downwards
         x_sign = -1 if ax.xaxis_inverted() else 1
         y_sign = -1 if ax.yaxis_inverted() else 1
-        for waypoint_id, wp in zip(waypoint_ids, waypoints):
-            if wp.alpha is None:
-                ax.scatter([wp.x], [wp.y], color=self.style.sign, zorder=3)
+        for sign_id, sign in zip(sign_ids, signs):
+            if sign.alpha is None:
+                ax.scatter([sign.x], [sign.y], color=self.style.sign, zorder=3)
                 label_x, label_y, label_distance = 0.0, -1.0, 8.0
             else:
                 # Viewing direction on the screen, alpha is measured clockwise from the positive y-axis
-                view_x = float(np.sin(np.deg2rad(wp.alpha))) * x_sign
-                view_y = float(np.cos(np.deg2rad(wp.alpha))) * y_sign
+                view_x = float(np.sin(np.deg2rad(sign.alpha))) * x_sign
+                view_y = float(np.cos(np.deg2rad(sign.alpha))) * y_sign
                 view_angle = float(np.rad2deg(np.arctan2(view_y, view_x)))
                 # The line marker is vertical, rotated by the viewing angle it lies across the viewing direction
                 ax.plot(
-                    wp.x,
-                    wp.y,
+                    sign.x,
+                    sign.y,
                     marker=(2, 2, view_angle),
                     markersize=12,
                     markeredgewidth=3,
@@ -1139,7 +1267,7 @@ class VisMap:
                 )
                 ax.annotate(
                     "",
-                    xy=(wp.x, wp.y),
+                    xy=(sign.x, sign.y),
                     xytext=(12 * view_x, 12 * view_y),
                     textcoords="offset points",
                     arrowprops=dict(
@@ -1153,64 +1281,159 @@ class VisMap:
                 )
                 label_x, label_y, label_distance = view_x, view_y, 16.0
             ax.annotate(
-                str(waypoint_id),
-                xy=(wp.x, wp.y),
+                str(sign_id),
+                xy=(sign.x, sign.y),
                 xytext=(label_distance * label_x, label_distance * label_y),
                 textcoords="offset points",
                 # Aligned so that the ID extends away from the sign
                 ha=("right", "center", "left")[round(label_x) + 1],
                 va=("top", "center", "bottom")[round(label_y) + 1],
-                **self._waypoint_id_style(),
+                **self._sign_id_style(),
             )
-        handles: List[Artist] = [
-            self._waypoint_handle(waypoint_id, wp)
-            for waypoint_id, wp in zip(waypoint_ids, waypoints)
+        return [
+            self._sign_handle(sign_id, sign) for sign_id, sign in zip(sign_ids, signs)
         ]
-        if plot_route:
-            handles.append(
-                Line2D(
-                    [],
-                    [],
-                    marker="o",
-                    linestyle="none",
-                    markerfacecolor=self.style.start_point_face,
-                    markeredgecolor=self.style.start_point_edge,
-                    label="start point",
-                )
-            )
-        return handles
 
     @staticmethod
-    def _waypoint_handle(waypoint_id: int, wp: Waypoint) -> Text:
+    def _sign_handle(sign_id: SignId, sign: Sign) -> Text:
         """
-        Create the legend entry of a waypoint, its ID as handle and its parameters as label.
+        Create the legend entry of a sign, its ID as handle and its parameters as label.
 
         The handle is drawn by :class:`_TextHandler`, which gives it the same appearance as the ID on the map.
 
-        :param waypoint_id: ID of the waypoint.
-        :type waypoint_id: int
-        :param wp: The waypoint.
-        :type wp: Waypoint
-        :return: Legend entry of the waypoint.
+        :param sign_id: ID of the sign.
+        :type sign_id: int or str
+        :param sign: The sign.
+        :type sign: Sign
+        :return: Legend entry of the sign.
         :rtype: matplotlib.text.Text
         """
-        label = f"C = {wp.c}"
-        if wp.alpha is not None:
-            label += f", $\\alpha$ = {wp.alpha}$^\\circ$"
-        return Text(text=str(waypoint_id), label=label)
+        label = f"C = {sign.c}"
+        if sign.alpha is not None:
+            label += f", $\\alpha$ = {sign.alpha}$^\\circ$"
+        return Text(text=str(sign_id), label=label)
 
-    def create_aset_map_plot(
+    def _plot_route(
+        self, ax: Axes, route_id: RouteId, coverage: Optional[BoolArray] = None
+    ) -> List[Artist]:
+        """
+        Plot the polyline of a route with its starting point and an arrow head at its end.
+
+        Without a coverage the route is drawn as a dashed line. With one it is drawn section by section in the
+        colors of covered and uncovered sections, which is where the sampling points of :meth:`get_route_points`
+        are used.
+
+        :param ax: Axes to plot into.
+        :type ax: matplotlib.axes.Axes
+        :param route_id: ID of the route to plot.
+        :type route_id: int or str
+        :param coverage: Coverage per point of :meth:`get_route_points`. If None, the route is drawn as one line.
+        :type coverage: np.ndarray, optional
+        :return: Legend entries for the starting point and, with a coverage, for the covered sections.
+        :rtype: list[matplotlib.artist.Artist]
+        """
+        route = self._get_route(route_id)
+        handles: List[Artist] = []
+        if coverage is None:
+            points = route.waypoints
+            ax.plot(
+                points[:, 0],
+                points[:, 1],
+                color=self.style.sign,
+                linestyle="--",
+                linewidth=1,
+            )
+            end_color = self.style.sign
+        else:
+            points = self.get_route_points(route_id)
+            # A section is covered if a sign is visible from both of its ends
+            covered = coverage[:-1] & coverage[1:]
+            colors = np.where(
+                covered, self.style.route_covered, self.style.route_uncovered
+            )
+            ax.add_collection(
+                LineCollection(
+                    list(np.stack([points[:-1], points[1:]], axis=1)),
+                    colors=list(colors),
+                    linewidths=2,
+                    zorder=2,
+                )
+            )
+            end_color = str(colors[-1])
+            handles += [
+                Line2D([], [], color=self.style.route_covered, label="sign visible"),
+                Line2D(
+                    [], [], color=self.style.route_uncovered, label="no sign visible"
+                ),
+            ]
+        start = route.waypoints[0]
+        ax.scatter(
+            [start[0]],
+            [start[1]],
+            facecolor=self.style.start_point_face,
+            edgecolor=self.style.start_point_edge,
+            zorder=3,
+        )
+        self._plot_route_end(ax, route, end_color)
+        handles.append(
+            Line2D(
+                [],
+                [],
+                marker="o",
+                linestyle="none",
+                markerfacecolor=self.style.start_point_face,
+                markeredgecolor=self.style.start_point_edge,
+                label="start point",
+            )
+        )
+        return handles
+
+    @staticmethod
+    def _plot_route_end(ax: Axes, route: Route, color: str) -> None:
+        """
+        Plot an arrow head at the end of a route, pointing in the direction of its last section.
+
+        :param ax: Axes to plot into.
+        :type ax: matplotlib.axes.Axes
+        :param route: The route.
+        :type route: Route
+        :param color: Color of the arrow head.
+        :type color: str
+        """
+        points = route.waypoints
+        # Direction on the screen: without flip_y_axis the y-axis points downwards
+        direction_x = (points[-1, 0] - points[-2, 0]) * (
+            -1 if ax.xaxis_inverted() else 1
+        )
+        direction_y = (points[-1, 1] - points[-2, 1]) * (
+            -1 if ax.yaxis_inverted() else 1
+        )
+        # The triangle marker points upwards and is rotated counterclockwise
+        angle = float(np.rad2deg(np.arctan2(direction_y, direction_x))) - 90
+        ax.plot(
+            points[-1, 0],
+            points[-1, 1],
+            marker=(3, 0, angle),
+            markersize=9,
+            color=color,
+            zorder=3,
+        )
+
+    def plot_aset_map(
         self,
         max_time: Optional[float] = None,
         plot_obstructions: bool = False,
         flip_y_axis: bool = True,
         ax: Optional[Axes] = None,
+        route_id: Optional[RouteId] = None,
+        legend: bool = True,
     ) -> FigureAxes:
         """
-        Create a plot visualizing the ASET map (Available Safe Egress Time) map indicating for each cell the first time any waypoint is not visible.
+        Create a plot visualizing the ASET map (Available Safe Egress Time) map indicating for each cell the first time any sign is not visible.
 
-        The color scale ``style.aset_cmap`` runs from 0 to the maximum time. Cells from which no waypoint is visible
-        at any time point up to the maximum time are drawn in ``style.never_visible``.
+        The color scale ``style.aset_cmap`` runs from 0 to the maximum time. Cells from which no sign is visible
+        at any time point up to the maximum time are drawn in ``style.never_visible``. For a route, its polyline
+        and its signs are drawn on the map.
 
         :param max_time: The maximum time value to consider for the ASET calculations. If None, it defaults to the last time in the visibility data.
         :type max_time: float, optional
@@ -1220,17 +1443,20 @@ class VisMap:
         :type flip_y_axis:  bool, Default is True.
         :param ax: Axes to plot into, e.g. a subplot. If None, a new figure is created.
         :type ax: matplotlib.axes.Axes, optional
+        :param route_id: ID of the route whose signs are considered. If None, all signs are considered.
+        :type route_id: int or str, optional
+        :param legend: Flag indicating whether a legend of the route is added. Default is True.
+        :type legend: bool, optional
+        :raises ValueError: If there is no route with this ID.
         :return: A tuple containing the matplotlib figure and axes objects that display the ASET map.
         :rtype: (matplotlib.figure.Figure, matplotlib.axes.Axes)
         """
         max_time = self._get_max_time(max_time)
-        aset_map = self.get_aset_map(max_time)
+        aset_map = self.get_aset_map(max_time, route_id)
         ever_visible = np.zeros_like(aset_map, dtype=bool)
-        for time, wp_agg_vismap in zip(
-            self.vismap_time_points, self.all_time_wp_agg_vismap_list
-        ):
+        for time in self.vismap_time_points:
             if time <= max_time:
-                ever_visible |= wp_agg_vismap
+                ever_visible |= self.get_agg_vismap(time, route_id)
         never_visible = ~ever_visible
 
         # Masked cells are drawn in the "bad" color of the colormap
@@ -1247,23 +1473,29 @@ class VisMap:
             vmax=max_time,
             cbar_kwargs={"label": "Time / s"},
         )
+        if route_id is not None:
+            route_handles = self._plot_route(ax, route_id)
+            handles = self._plot_signs(ax, self._get_route(route_id).signs)
+            if legend:
+                self._add_legend(ax, handles + route_handles, title=f"Route {route_id}")
         return fig, ax
 
-    def create_time_agg_wp_agg_vismap_plot(
+    def plot_time_agg_vismap(
         self,
         t_max: Optional[float] = None,
         plot_obstructions: bool = False,
         flip_y_axis: bool = True,
         ax: Optional[Axes] = None,
         legend: bool = True,
+        route_id: Optional[RouteId] = None,
     ) -> FigureAxes:
         """
-        Create a plot visualizing the time-aggregated visibility map for all waypoints.
+        Create a plot visualizing the time-aggregated visibility map for the signs of a route or for all signs.
 
-        The map uses the colors ``style.visible`` and ``style.not_visible`` to distinguish whether any waypoint is
-        visible or not from each cell. The plot also features the trajectory of movement from the start point through
-        all waypoints, marked with their IDs. The contrast factor and the viewing angle of each waypoint are given in
-        a legend to the right of the map.
+        The map uses the colors ``style.visible`` and ``style.not_visible`` to distinguish whether any sign is
+        visible or not from each cell at every time point. The route is drawn section by section in the colors of
+        covered and uncovered sections, its signs are marked with their IDs. The contrast factor and the viewing
+        angle of each sign are given in a legend to the right of the map.
 
         :param t_max: The maximum time to consider. If not specified, all computed time points are used.
         :type t_max: float, optional
@@ -1275,41 +1507,50 @@ class VisMap:
         :type ax: matplotlib.axes.Axes, optional
         :param legend: Flag indicating whether a legend is added. Default is True.
         :type legend: bool, optional
+        :param route_id: ID of the route to plot. If None, the map is aggregated over all signs and no route
+                         is drawn.
+        :type route_id: int or str, optional
+        :raises ValueError: If there is no route with this ID.
         :return: A tuple containing the matplotlib figure and axes objects that display the aggregated visibility map.
         :rtype: (matplotlib.figure.Figure, matplotlib.axes.Axes)
         """
+        time_agg_vismap = self.get_time_agg_vismap(t_max, route_id)
         fig, ax = self._plot_boolean_map(
-            self.get_time_agg_wp_agg_vismap(t_max),
+            time_agg_vismap,
             ax=ax,
             plot_obstructions=plot_obstructions,
             flip_y_axis=flip_y_axis,
             colorbar=True,
         )
-        handles = self._plot_waypoints(ax, list(self.all_wp_dict), plot_route=True)
+        handles, title = self._plot_signs_and_route(
+            ax, route_id, coverage_map=time_agg_vismap
+        )
         if legend and handles:
-            self._add_legend(ax, handles, title="Waypoints")
+            self._add_legend(ax, handles, title=title)
         return fig, ax
 
     def plot_vismap(
         self,
         time: float,
-        waypoint_id: Optional[int] = None,
+        sign_id: Optional[SignId] = None,
         ax: Optional[Axes] = None,
         plot_obstructions: bool = False,
         flip_y_axis: bool = True,
         colorbar: bool = True,
         legend: bool = True,
+        route_id: Optional[RouteId] = None,
     ) -> FigureAxes:
         """
-        Plot the boolean vismap at a time point, either of one waypoint or aggregated over all waypoints.
+        Plot the boolean vismap at a time point, either of one sign, of a route or aggregated over all signs.
 
-        The time is rounded to the closest time point computed by :meth:`compute_all`. The plot shows the waypoints
-        with their IDs, their contrast factor and viewing angle are given in a legend to the right of the map.
+        The time is rounded to the closest time point computed by :meth:`compute_all`. The plot shows the signs
+        with their IDs, their contrast factor and viewing angle are given in a legend to the right of the map. For
+        a route, its polyline is drawn section by section in the colors of covered and uncovered sections.
 
         :param time: Time point in seconds.
         :type time: float
-        :param waypoint_id: ID of the waypoint. If None, the vismap aggregated over all waypoints is plotted.
-        :type waypoint_id: int, optional
+        :param sign_id: ID of the sign. If None, the vismap of the route or aggregated over all signs is plotted.
+        :type sign_id: int or str, optional
         :param ax: Axes to plot into, e.g. a subplot. If None, a new figure is created.
         :type ax: matplotlib.axes.Axes, optional
         :param plot_obstructions: Flag indicating whether obstruction at the evaluation height should be plotted or not.
@@ -1318,24 +1559,29 @@ class VisMap:
         :type flip_y_axis: bool, optional
         :param colorbar: Flag indicating whether a colorbar is added. Default is True.
         :type colorbar: bool, optional
-        :param legend: Flag indicating whether a legend of the waypoints is added. Default is True.
+        :param legend: Flag indicating whether a legend of the signs is added. Default is True.
         :type legend: bool, optional
+        :param route_id: ID of the route whose signs are aggregated and whose polyline is drawn. If None, all signs
+                         are aggregated.
+        :type route_id: int or str, optional
         :raises RuntimeError: If :meth:`compute_all` has not been called.
-        :raises ValueError: If ``time`` exceeds the maximum computed time or there is no waypoint with this ID.
+        :raises ValueError: If ``time`` exceeds the maximum computed time, there is no sign or route with this ID
+                            or both a sign and a route are given.
         :return: The figure and the axes of the plot.
         :rtype: (matplotlib.figure.Figure, matplotlib.axes.Axes)
         """
-        if not self.all_time_wp_agg_vismap_list:
+        if not self.all_time_sign_agg_vismap_list:
             raise RuntimeError("No vismaps computed. Call compute_all() first.")
-        if waypoint_id is None:
-            vismap = self.get_wp_agg_vismap(time)
-            waypoint_ids = list(self.all_wp_dict)
+        if sign_id is not None and route_id is not None:
+            raise ValueError("Pass either a sign or a route, not both.")
+        if sign_id is None:
+            vismap = self.get_agg_vismap(time, route_id)
         else:
-            position = self._get_waypoint_position(waypoint_id)
             self._check_time_in_computed_range(time)
             time_id = get_id_of_closest_value(self.vismap_time_points, time)
-            vismap = self.all_time_all_wp_vismap_array_list[time_id][position]
-            waypoint_ids = [waypoint_id]
+            vismap = self.all_time_all_sign_vismap_list[time_id][
+                self._get_sign_position(sign_id)
+            ]
         fig, ax = self._plot_boolean_map(
             vismap,
             ax=ax,
@@ -1343,10 +1589,75 @@ class VisMap:
             flip_y_axis=flip_y_axis,
             colorbar=colorbar,
         )
-        handles = self._plot_waypoints(ax, waypoint_ids, plot_route=False)
+        if sign_id is not None:
+            handles: List[Artist] = self._plot_signs(ax, [sign_id])
+            title: Optional[str] = "Signs"
+        else:
+            handles, title = self._plot_signs_and_route(ax, route_id, vismap)
         if legend and handles:
-            self._add_legend(ax, handles, title="Waypoints")
+            self._add_legend(ax, handles, title=title)
         return fig, ax
+
+    def plot_sign_vismap(
+        self, sign_id: SignId, time: float, **kwargs: Any
+    ) -> FigureAxes:
+        """
+        Plot the boolean vismap of a single sign at a time point, see :meth:`plot_vismap`.
+
+        :param sign_id: ID of the sign.
+        :type sign_id: int or str
+        :param time: Time point in seconds.
+        :type time: float
+        :param kwargs: Further keyword arguments of :meth:`plot_vismap`.
+        :return: The figure and the axes of the plot.
+        :rtype: (matplotlib.figure.Figure, matplotlib.axes.Axes)
+        """
+        return self.plot_vismap(time, sign_id=sign_id, **kwargs)
+
+    def plot_route_vismap(
+        self, route_id: RouteId, time: float, **kwargs: Any
+    ) -> FigureAxes:
+        """
+        Plot the boolean vismap of the signs of a route at a time point together with its coverage.
+
+        See :meth:`plot_vismap`.
+
+        :param route_id: ID of the route.
+        :type route_id: int or str
+        :param time: Time point in seconds.
+        :type time: float
+        :param kwargs: Further keyword arguments of :meth:`plot_vismap`.
+        :return: The figure and the axes of the plot.
+        :rtype: (matplotlib.figure.Figure, matplotlib.axes.Axes)
+        """
+        return self.plot_vismap(time, route_id=route_id, **kwargs)
+
+    def _plot_signs_and_route(
+        self, ax: Axes, route_id: Optional[RouteId], coverage_map: BoolArray
+    ) -> Tuple[List[Artist], Optional[str]]:
+        """
+        Plot the signs of a route together with the route itself, or all signs without a route.
+
+        :param ax: Axes to plot into.
+        :type ax: matplotlib.axes.Axes
+        :param route_id: ID of the route. If None, all signs are plotted.
+        :type route_id: int or str, optional
+        :param coverage_map: Vismap the coverage of the route is taken from, e.g. at one time point or aggregated.
+        :type coverage_map: np.ndarray
+        :return: Legend entries and the title of the legend.
+        :rtype: (list[matplotlib.artist.Artist], str)
+        """
+        handles: List[Artist] = []
+        if route_id is None:
+            sign_ids: List[SignId] = list(self.all_sign_dict)
+            title: Optional[str] = "Signs"
+        else:
+            sign_ids = list(self._get_route(route_id).signs)
+            title = f"Route {route_id}"
+            handles += self._plot_route(
+                ax, route_id, self._coverage_from_vismap(route_id, coverage_map)
+            )
+        return self._plot_signs(ax, sign_ids) + handles, title
 
     def add_background_image(
         self, file: str, extent: Optional[Tuple[float, float, float, float]] = None
@@ -1382,16 +1693,16 @@ class VisMap:
         progress: bool = False,
     ) -> None:
         """
-        Execute all required computations to generate aggregated visibility maps over all waypoints and time points.
+        Execute all required computations to generate aggregated visibility maps over all signs and time points.
 
         The results of previous calls are replaced. Messages about the progress are sent to the logger
-        ``fdsvismap.FDSVisMap`` (level INFO per time point, DEBUG per waypoint), e.g. shown by
+        ``fdsvismap.FDSVisMap`` (level INFO per time point, DEBUG per sign), e.g. shown by
         ``logging.basicConfig(level=logging.INFO)``.
 
         :param t_max: The maximum simulation time to compute up to. If not specified, all available time points are computed.
         :type t_max: float, optional
         :param view_angle: Determines if view angles should be considered in the visibility calculations,
-                          affecting how visibility is computed relative to the waypoint orientations. Default is True.
+                          affecting how visibility is computed relative to the sign orientations. Default is True.
         :type view_angle: bool
         :param obstructions: Determines if collisions (obstructions) should be considered, impacting whether
                          certain paths are considered visible based on physical barriers. Default is True.
@@ -1399,7 +1710,7 @@ class VisMap:
         :param aa: Determines if antialiasing should be applied when computing visibility lines, which can
                   smooth the appearance of the visibility boundaries but might affect computational performance. Default is True.
         :type aa: bool
-        :param progress: Determines if progress bars are shown while the waypoints are prepared and the vismaps are
+        :param progress: Determines if progress bars are shown while the signs are prepared and the vismaps are
                          computed. Default is False.
         :type progress: bool
         """
@@ -1409,21 +1720,21 @@ class VisMap:
             else self.vismap_time_points
         )
         self._t_max_computed = float(time_points[-1])
-        self.all_time_all_wp_vismap_array_list = []
-        self.all_time_wp_agg_vismap_list = []
+        self.all_time_all_sign_vismap_list = []
+        self.all_time_sign_agg_vismap_list = []
         self.build_help_arrays(
             view_angle=view_angle, obstructions=obstructions, aa=aa, progress=progress
         )
         for time in progress_bar(time_points, progress, "Computing vismaps"):
             logger.info("Simulation time %s s of %s s", time, self._t_max_computed)
-            all_wp_vismap_array_list = []
-            for waypoint_id in self.all_wp_dict.keys():
-                logger.debug("Waypoint %s at simulation time %s s", waypoint_id, time)
-                vismap = self.get_vismap(waypoint_id, time)
-                all_wp_vismap_array_list.append(vismap)
-            self.all_time_all_wp_vismap_array_list.append(all_wp_vismap_array_list)
-            wp_agg_vismap = np.logical_or.reduce(all_wp_vismap_array_list)
-            self.all_time_wp_agg_vismap_list.append(wp_agg_vismap)
+            all_sign_vismap_list = []
+            for sign_id in self.all_sign_dict.keys():
+                logger.debug("Sign %s at simulation time %s s", sign_id, time)
+                vismap = self.get_sign_vismap(sign_id, time)
+                all_sign_vismap_list.append(vismap)
+            self.all_time_all_sign_vismap_list.append(all_sign_vismap_list)
+            sign_agg_vismap = np.logical_or.reduce(all_sign_vismap_list)
+            self.all_time_sign_agg_vismap_list.append(sign_agg_vismap)
 
     def get_local_visibility(self, time: float, x: float, y: float, c: float) -> float:
         """
@@ -1454,13 +1765,11 @@ class VisMap:
         visibility: float = min(c / local_extco, self.max_vis)
         return visibility
 
-    def get_visibility_to_wp(
-        self, time: float, x: float, y: float, waypoint_id: int
+    def get_visibility_to_sign(
+        self, time: float, x: float, y: float, sign_id: SignId
     ) -> float:
         """
-        Calculate the visibility at a specific cell closest to the given x, y.
-
-        coordinates at a certain time relative to a specific waypoint.
+        Calculate the visibility of a sign at the cell closest to the given x, y coordinates at a certain time.
 
         :param time: The simulation time at which to calculate the visibility.
         :type time: float
@@ -1468,24 +1777,26 @@ class VisMap:
         :type x: float
         :param y: The y-coordinate in the simulation grid where visibility is to be calculated.
         :type y: float
-        :param waypoint_id: The ID of the waypoint to check visibility for.
-        :type waypoint_id: int
-        :return: The computed visibility value at the given location and time relative to a specific waypoint..
+        :param sign_id: The ID of the sign to check visibility for.
+        :type sign_id: int or str
+        :raises ValueError: If there is no sign with this ID.
+        :return: The computed visibility value at the given location and time relative to a specific sign.
         :rtype: float
         """
+        self._get_sign_position(sign_id)
         ref_x_id = get_id_of_closest_value(self.all_x_coords, x)
         ref_y_id = get_id_of_closest_value(self.all_y_coords, y)
-        visibility_array = self._get_visibility_array(waypoint_id, time)
-        non_concealed_cells_array = self.all_wp_non_concealed_cells_array_dict[
-            waypoint_id
+        visibility_array = self._get_visibility_array(sign_id, time)
+        non_concealed_cells_array = self.all_sign_non_concealed_cells_array_dict[
+            sign_id
         ]
         masked_visibility_array = visibility_array * non_concealed_cells_array
         visibility = float(masked_visibility_array[ref_y_id, ref_x_id])
         return visibility
 
-    def wp_is_visible(self, time: float, x: float, y: float, waypoint_id: int) -> bool:
+    def sign_is_visible(self, time: float, x: float, y: float, sign_id: SignId) -> bool:
         """
-        Determine if a waypoint is visible from a specific cell closest to the given x, y coordinates at a certain time.
+        Determine if a sign is visible from the cell closest to the given x, y coordinates at a certain time.
 
         :param time: The simulation time for which visibility is checked.
         :type time: float
@@ -1493,36 +1804,40 @@ class VisMap:
         :type x: float
         :param y: The y-coordinate of the location from which visibility is checked.
         :type y: float
-        :param waypoint_id: The ID of the waypoint to check visibility for.
-        :type waypoint_id: int
-        :raises ValueError: If ``time`` exceeds the maximum time computed by :meth:`compute_all`.
-        :return: A boolean value indicating whether the specified waypoint is visible from the given location and time.
+        :param sign_id: The ID of the sign to check visibility for.
+        :type sign_id: int or str
+        :raises ValueError: If ``time`` exceeds the maximum time computed by :meth:`compute_all` or there is no
+                            sign with this ID.
+        :return: A boolean value indicating whether the specified sign is visible from the given location and time.
         :rtype: bool
         """
         self._check_time_in_computed_range(time)
         time_id = get_id_of_closest_value(self.vismap_time_points, time)
         ref_x_id = get_id_of_closest_value(self.all_x_coords, x)
         ref_y_id = get_id_of_closest_value(self.all_y_coords, y)
-        vismap_array = self.all_time_all_wp_vismap_array_list[time_id][waypoint_id]
+        vismap_array = self.all_time_all_sign_vismap_list[time_id][
+            self._get_sign_position(sign_id)
+        ]
         is_visible = bool(vismap_array[ref_y_id, ref_x_id])
         return is_visible
 
-    def get_distance_to_wp(self, x: float, y: float, waypoint_id: int) -> float:
+    def get_distance_to_sign(self, x: float, y: float, sign_id: SignId) -> float:
         """
-        Calculate the distance from a specific cell closest to the given x, y coordinates to a designated waypoint.
+        Calculate the distance from the given x, y coordinates to a sign.
 
         :param x: The x-coordinate of the location from which to measure distance.
         :type x: float
         :param y: The y-coordinate of the location from which to measure distance.
         :type y: float
-        :param waypoint_id: The ID of the waypoint to which distance is measured.
-        :type waypoint_id: int
-        :return: The distance to the waypoint from the specified location.
+        :param sign_id: The ID of the sign to which distance is measured.
+        :type sign_id: int or str
+        :raises ValueError: If there is no sign with this ID.
+        :return: The distance to the sign from the specified location.
         :rtype: float
         """
-        wp = self.all_wp_dict[waypoint_id]
-        distance_to_wp = float(np.linalg.norm(np.array([x - wp.x, y - wp.y]), axis=0))
-        return distance_to_wp
+        self._get_sign_position(sign_id)
+        sign = self.all_sign_dict[sign_id]
+        return float(np.linalg.norm(np.array([x - sign.x, y - sign.y]), axis=0))
 
     def _add_visual_object(
         self,
