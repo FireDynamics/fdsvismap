@@ -120,7 +120,7 @@ class VisMap:
     :vartype all_x_coords: np.ndarray or None
     :ivar obstructions_collection: Collection of obstruction data from FDS simulation. Initialized as None.
     :vartype obstructions_collection: list or None # TODO: check
-    :ivar vismap_time_points: Time points for which the visibility maps are created. Initialized as None.
+    :ivar vismap_time_points: Time points for which the visibility maps are created, in ascending order. Initialized as an empty array.
     :vartype vismap_time_points: np.ndarray or None
     :ivar fds_time_points: Time points available in the FDS simulation data. Initialized as None.
     :vartype fds_time_points: np.ndarray or None
@@ -207,12 +207,14 @@ class VisMap:
         """
         Set the times on which the simulation should be evaluated.
 
-        Only the slice data of the FDS time steps closest to these time points is kept in memory.
+        The time points are sorted in ascending order and duplicates are removed, because the aggregation over
+        time relies on that order. Only the slice data of the FDS time steps closest to these time points is kept
+        in memory.
 
-        :param time_points: List of time points in the simulation.
+        :param time_points: Time points in the simulation in seconds, in any order.
         :type time_points: list
         """
-        self.vismap_time_points = np.array(time_points)
+        self.vismap_time_points = np.unique(np.asarray(time_points, dtype=float))
         self._release_slice_frames()
 
     def set_visibility_bounds(self, min_vis: float, max_vis: float) -> None:
@@ -1730,7 +1732,7 @@ class VisMap:
             if t_max is not None
             else self.vismap_time_points
         )
-        self._t_max_computed = float(time_points[-1])
+        self._t_max_computed = float(np.max(time_points))
         self.all_time_all_sign_vismap_list = []
         self.all_time_sign_agg_vismap_list = []
         self.build_help_arrays(

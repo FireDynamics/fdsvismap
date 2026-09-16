@@ -106,6 +106,50 @@ class TestVisMapBasics:
             vis.add_background_image(bg_img, extent=(22, -2, -1, 11))
 
 
+class TestTimePoints:
+    """Tests for the time points the maps are computed at."""
+
+    @pytest.fixture
+    def sim_dir(self, project_root):
+        """Get the directory of the FDS output of the example."""
+        return str(project_root / "examples" / "room_fire" / "fds_data")
+
+    def computed(self, sim_dir, times):
+        """Compute the maps of two signs at the given time points."""
+        vis = VisMap()
+        vis.read_fds_data(sim_dir, fds_slc_height=2)
+        vis.add_sign(1, 8.4, 4.8, 3, 0)
+        vis.add_sign(2, 9.8, 4, 3, 270)
+        vis.set_time_points(times)
+        vis.compute_all()
+        return vis
+
+    def test_time_points_are_sorted(self, sim_dir):
+        """Test that unsorted time points give the same maps as sorted ones."""
+        ordered = self.computed(sim_dir, [0, 150, 300, 450])
+        shuffled = self.computed(sim_dir, [300, 0, 450, 150])
+
+        np.testing.assert_array_equal(
+            shuffled.vismap_time_points, [0.0, 150.0, 300.0, 450.0]
+        )
+        np.testing.assert_array_equal(ordered.get_aset_map(), shuffled.get_aset_map())
+        for time in (0, 150, 300, 450):
+            np.testing.assert_array_equal(
+                ordered.get_agg_vismap(time), shuffled.get_agg_vismap(time)
+            )
+
+        # The maximum time is the latest one, not the last one that was passed
+        assert shuffled.get_aset_map().max() == 450
+        with pytest.raises(ValueError):
+            shuffled.get_agg_vismap(500)
+
+    def test_duplicate_time_points_are_dropped(self, sim_dir):
+        """Test that a time point given twice is computed once."""
+        vis = self.computed(sim_dir, [0, 300, 300, 150])
+        np.testing.assert_array_equal(vis.vismap_time_points, [0.0, 150.0, 300.0])
+        assert len(vis.all_time_sign_agg_vismap_list) == 3
+
+
 class TestVisibilityCalculations:
     """Tests for visibility calculations."""
 
