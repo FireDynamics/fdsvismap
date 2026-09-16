@@ -1293,7 +1293,12 @@ class VisMap:
             title_fontsize=8,
         )
 
-    def _plot_signs(self, ax: Axes, sign_ids: Sequence[SignId]) -> List[Artist]:
+    def _plot_signs(
+        self,
+        ax: Axes,
+        sign_ids: Sequence[SignId],
+        routes_by_sign: Optional[Dict[SignId, List[RouteId]]] = None,
+    ) -> List[Artist]:
         """
         Plot the signs with their IDs.
 
@@ -1306,6 +1311,8 @@ class VisMap:
         :type ax: matplotlib.axes.Axes
         :param sign_ids: IDs of the signs to plot.
         :type sign_ids: list[int or str]
+        :param routes_by_sign: Routes a sign belongs to, named in its legend entry. If None, no routes are named.
+        :type routes_by_sign: dict[int or str, list[int or str]], optional
         :return: Legend entries for the signs.
         :rtype: list[matplotlib.artist.Artist]
         """
@@ -1358,11 +1365,14 @@ class VisMap:
                 **self._sign_id_style(),
             )
         return [
-            self._sign_handle(sign_id, sign) for sign_id, sign in zip(sign_ids, signs)
+            self._sign_handle(sign_id, sign, (routes_by_sign or {}).get(sign_id, []))
+            for sign_id, sign in zip(sign_ids, signs)
         ]
 
     @staticmethod
-    def _sign_handle(sign_id: SignId, sign: Sign) -> Text:
+    def _sign_handle(
+        sign_id: SignId, sign: Sign, routes: Sequence[RouteId] = ()
+    ) -> Text:
         """
         Create the legend entry of a sign, its ID as handle and its parameters as label.
 
@@ -1372,12 +1382,16 @@ class VisMap:
         :type sign_id: int or str
         :param sign: The sign.
         :type sign: Sign
+        :param routes: Routes the sign belongs to, appended to the label.
+        :type routes: list[int or str], optional
         :return: Legend entry of the sign.
         :rtype: matplotlib.text.Text
         """
         label = f"C = {sign.c}"
         if sign.alpha is not None:
             label += f", $\\alpha$ = {sign.alpha}$^\\circ$"
+        if routes:
+            label += f" ({', '.join(str(route_id) for route_id in routes)})"
         return Text(text=str(sign_id), label=label)
 
     def _plot_route(
@@ -1448,6 +1462,196 @@ class VisMap:
             )
         )
         return handles
+
+    def plot_routes(
+        self,
+        route_ids: Optional[Sequence[RouteId]] = None,
+        ax: Optional[Axes] = None,
+        plot_obstructions: bool = False,
+        flip_y_axis: bool = True,
+        legend: bool = True,
+    ) -> FigureAxes:
+        """
+        Plot the routes and the signs over the background image, without any visibility map.
+
+        Every route is drawn as a dashed line in ``style.sign`` with its starting point, an arrow head at its end
+        and its name along its longest section. The legend names the routes a sign belongs to. The plot shows the
+        input of the evaluation and does not need :meth:`compute_all`.
+
+        :param route_ids: IDs of the routes to plot. If None, all routes and all signs are plotted, otherwise
+                          only the given routes and their signs.
+        :type route_ids: list[int or str], optional
+        :param ax: Axes to plot into, e.g. a subplot. If None, a new figure is created.
+        :type ax: matplotlib.axes.Axes, optional
+        :param plot_obstructions: Flag indicating whether obstruction at the evaluation height should be plotted or not.
+        :type plot_obstructions: bool, optional
+        :param flip_y_axis: Flag indicating whether y-axis should be flipped or not to have the origin at bottom left.
+        :type flip_y_axis: bool, optional
+        :param legend: Flag indicating whether a legend of the signs is added. Default is True.
+        :type legend: bool, optional
+        :raises RuntimeError: If no FDS data has been read.
+        :raises ValueError: If there is no route with one of these IDs.
+        :return: The figure and the axes of the plot.
+        :rtype: (matplotlib.figure.Figure, matplotlib.axes.Axes)
+        """
+        if self.fds_grid_shape is None:
+            raise RuntimeError("FDS data not loaded. Call read_fds_data() first.")
+        routes = list(self.all_route_dict) if route_ids is None else list(route_ids)
+        routes_by_sign: Dict[SignId, List[RouteId]] = {}
+        for route_id in routes:
+            for sign_id in self._get_route(route_id).signs:
+                routes_by_sign.setdefault(sign_id, []).append(route_id)
+        sign_ids = (
+            list(self.all_sign_dict) if route_ids is None else list(routes_by_sign)
+        )
+
+        # An empty map shows the background image and the domain without any result. The values below the mask
+        # are zeros, masked_all would leave uninitialized values that overflow when they are normalized.
+        fig, ax = self.plot_map(
+            np.ma.masked_array(
+                np.zeros((self.fds_grid_shape[1], self.fds_grid_shape[0])), mask=True
+            ),
+            ax=ax,
+            plot_obstructions=plot_obstructions,
+            flip_y_axis=flip_y_axis,
+            vmin=0,
+            vmax=1,
+            colorbar=False,
+        )
+        handles: List[Artist] = []
+        for route_id in routes:
+            entries = self._plot_route(ax, route_id)
+            # The starting points look the same, one entry describes all of them
+            handles = handles or entries
+        handles = self._plot_signs(ax, sign_ids, routes_by_sign) + handles
+        self._plot_route_names(ax, routes)
+        if legend and handles:
+            self._add_legend(ax, handles, title="Signs")
+        return fig, ax
+
+    def _plot_route_names(self, ax: Axes, route_ids: Sequence[RouteId]) -> None:
+        """
+        Write the name of each route along its polyline, at a place where it overlaps no other text.
+
+        The candidates are points along the sections of the route, the longest section first. The first candidate
+        whose text overlaps neither an existing text, such as the ID of a sign, nor a name placed before is used.
+        If every candidate overlaps, the name stays at the first one.
+
+        :param ax: Axes to plot into.
+        :type ax: matplotlib.axes.Axes
+        :param route_ids: IDs of the routes to name.
+        :type route_ids: list[int or str]
+        """
+        renderer = self._get_renderer(ax)
+        occupied = (
+            [text.get_window_extent(renderer) for text in ax.texts]
+            if renderer is not None
+            else []
+        )
+        for route_id in route_ids:
+            candidates = self._route_name_positions(ax, route_id)
+            if renderer is None:
+                # Without a renderer the size of a text is unknown, so the first candidate has to do
+                self._draw_route_name(ax, route_id, *candidates[0])
+                continue
+            for index, candidate in enumerate(candidates):
+                text = self._draw_route_name(ax, route_id, *candidate)
+                extent = text.get_window_extent(renderer)
+                if index == 0:
+                    first, first_extent = text, extent
+                if not any(extent.overlaps(other) for other in occupied):
+                    occupied.append(extent)
+                    break
+                text.remove()
+            else:
+                # Every candidate overlaps, the first one is as good as any
+                ax.add_artist(first)
+                occupied.append(first_extent)
+
+    @staticmethod
+    def _get_renderer(ax: Axes) -> Any:
+        """
+        Get the renderer that measures the size of a text, if the backend has one.
+
+        :param ax: Axes of the plot.
+        :type ax: matplotlib.axes.Axes
+        :return: The renderer, or None for a backend that builds one only while saving, such as pdf.
+        :rtype: matplotlib.backend_bases.RendererBase or None
+        """
+        canvas: Any = cast(Figure, ax.figure).canvas
+        try:
+            return canvas.get_renderer()
+        except AttributeError:
+            return None
+
+    def _draw_route_name(
+        self, ax: Axes, route_id: RouteId, x: float, y: float, angle: float
+    ) -> Text:
+        """
+        Draw the name of a route along its polyline.
+
+        :param ax: Axes to plot into.
+        :type ax: matplotlib.axes.Axes
+        :param route_id: ID of the route, which is its name.
+        :type route_id: int or str
+        :param x: x-coordinate of the anchor of the text.
+        :type x: float
+        :param y: y-coordinate of the anchor of the text.
+        :type y: float
+        :param angle: Angle of the text on the screen in degrees.
+        :type angle: float
+        :return: The text of the name.
+        :rtype: matplotlib.text.Text
+        """
+        return ax.text(
+            x,
+            y,
+            str(route_id),
+            rotation=angle,
+            rotation_mode="anchor",
+            transform_rotates_text=True,
+            ha="center",
+            va="bottom",
+            color=self.style.sign,
+            fontsize=8,
+            bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="none", alpha=0.7),
+            zorder=3,
+        )
+
+    def _route_name_positions(
+        self, ax: Axes, route_id: RouteId
+    ) -> List[Tuple[float, float, float]]:
+        """
+        Get the candidates for the name of a route as position and angle, the longest section first.
+
+        :param ax: Axes the route is plotted in, its inverted axes turn the angle.
+        :type ax: matplotlib.axes.Axes
+        :param route_id: ID of the route.
+        :type route_id: int or str
+        :return: Candidates as (x, y, angle in degrees).
+        :rtype: list[tuple[float, float, float]]
+        """
+        points = self._get_route(route_id).waypoints
+        sections = np.diff(points, axis=0)
+        lengths = np.linalg.norm(sections, axis=1)
+        # Directions on the screen: without flip_y_axis the y-axis points downwards
+        x_sign = -1 if ax.xaxis_inverted() else 1
+        y_sign = -1 if ax.yaxis_inverted() else 1
+        candidates = []
+        for section in np.argsort(lengths)[::-1]:
+            angle = float(
+                np.rad2deg(
+                    np.arctan2(
+                        sections[section, 1] * y_sign, sections[section, 0] * x_sign
+                    )
+                )
+            )
+            # Keep the text readable instead of upside down
+            angle = (angle + 90) % 180 - 90
+            for share in (0.5, 0.25, 0.75):
+                x, y = points[section] + sections[section] * share
+                candidates.append((float(x), float(y), angle))
+        return candidates
 
     @staticmethod
     def _plot_route_end(ax: Axes, route: Route, color: str) -> None:

@@ -36,12 +36,26 @@ vis.add_route(
     signs=[1, 2, 3],
 )
 
+vis.add_route(
+    "exit route 2",
+    [(1, 9), (4, 7), (8, 5.5), (8.5, 4.2), (11, 4.2), (15, 6), (17, 9.5)],
+    signs=[1, 2, 3],
+)
+
 # Set times when the simulation should be evaluated.
 times = range(0, 500, 50)
 vis.set_time_points(times)
 
 # Add a visual obstruction that affects visibility calculations.
 vis.add_visual_obstruction(8, 8.8, 4.6, 4.8)
+
+# Plot the input, the routes with their signs and the obstructions the calculation knows about. This needs no
+# calculation and saves the plot as pdf next to this script.
+fig, ax = vis.plot_routes(plot_obstructions=True)
+routes_file = example_dir / "routes.pdf"
+fig.savefig(routes_file, dpi=300)
+plt.close(fig)
+print(f"Routes and signs saved as '{routes_file}'.")
 
 # Do the required calculations to create the Vismap, progress=True shows progress bars.
 print("Starting computation...")
