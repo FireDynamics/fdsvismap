@@ -19,7 +19,6 @@ from typing import (
 import fdsreader as fds  # type: ignore[import-untyped]
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
-import matplotlib.ticker as mticker
 import numpy as np
 from matplotlib.artist import Artist
 from matplotlib.axes import Axes
@@ -27,6 +26,7 @@ from matplotlib.collections import LineCollection
 from matplotlib.figure import Figure
 from matplotlib.legend_handler import HandlerBase
 from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 from matplotlib.text import Text
 from numpy.typing import ArrayLike, NDArray
 from skimage.draw import line, line_aa
@@ -120,7 +120,7 @@ class VisMap:
     :vartype all_x_coords: np.ndarray or None
     :ivar obstructions_collection: Collection of obstruction data from FDS simulation. Initialized as None.
     :vartype obstructions_collection: list or None # TODO: check
-    :ivar vismap_time_points: Time points for which the visibility maps are created. Initialized as None.
+    :ivar vismap_time_points: Time points for which the visibility maps are created, in ascending order. Initialized as an empty array.
     :vartype vismap_time_points: np.ndarray or None
     :ivar fds_time_points: Time points available in the FDS simulation data. Initialized as None.
     :vartype fds_time_points: np.ndarray or None
@@ -203,17 +203,62 @@ class VisMap:
         self._slice_frames: Dict[int, Float32Array] = {}
         # ----------------------------------------------------
 
+    def _invalidate_results(self) -> None:
+        """
+        Discard the computed maps and the auxiliary arrays, because their input has changed.
+
+        Signs, time points, obstructions and the visibility bounds all enter the maps. Without discarding the
+        results, a map computed before the change would be returned for the new input.
+        """
+        self.all_time_all_sign_vismap_list = []
+        self.all_time_sign_agg_vismap_list = []
+        self._t_max_computed = None
+        self.all_sign_distance_array_dict = {}
+        self.all_sign_non_concealed_cells_array_dict = {}
+        self.all_sign_non_concealed_cells_xy_idx_dict = {}
+        self.all_sign_angle_array_dict = {}
+        self.all_sign_ray_casting_cache_dict = {}
+
+    def _check_computed(self) -> None:
+        """
+        Raise a RuntimeError if there are no visibility maps for the current input.
+
+        :raises RuntimeError: If :meth:`compute_all` has not been called since the last change of the input.
+        """
+        if not self.all_time_sign_agg_vismap_list:
+            raise RuntimeError(
+                "No vismaps for the current signs, time points and obstructions. Call compute_all() first."
+            )
+
+    def _check_prepared(self, sign_id: SignId) -> None:
+        """
+        Raise a RuntimeError if the auxiliary arrays of a sign are missing.
+
+        :param sign_id: ID of the sign.
+        :type sign_id: int or str
+        :raises ValueError: If there is no sign with this ID.
+        :raises RuntimeError: If the auxiliary arrays have not been built since the last change of the input.
+        """
+        self._get_sign_position(sign_id)
+        if sign_id not in self.all_sign_ray_casting_cache_dict:
+            raise RuntimeError(
+                f"No auxiliary arrays for sign {sign_id}. Call compute_all() first."
+            )
+
     def set_time_points(self, time_points: Sequence[float]) -> None:
         """
         Set the times on which the simulation should be evaluated.
 
-        Only the slice data of the FDS time steps closest to these time points is kept in memory.
+        The time points are sorted in ascending order and duplicates are removed, because the aggregation over
+        time relies on that order. Only the slice data of the FDS time steps closest to these time points is kept
+        in memory.
 
-        :param time_points: List of time points in the simulation.
+        :param time_points: Time points in the simulation in seconds, in any order.
         :type time_points: list
         """
-        self.vismap_time_points = np.array(time_points)
+        self.vismap_time_points = np.unique(np.asarray(time_points, dtype=float))
         self._release_slice_frames()
+        self._invalidate_results()
 
     def set_visibility_bounds(self, min_vis: float, max_vis: float) -> None:
         """
@@ -227,6 +272,7 @@ class VisMap:
         """
         self.min_vis = min_vis
         self.max_vis = max_vis
+        self._invalidate_results()
 
     def add_sign(
         self,
@@ -257,6 +303,7 @@ class VisMap:
         self.all_sign_dict[sign_id] = Sign(
             x, y, c, None if alpha == "omni" else cast(Optional[float], alpha)
         )
+        self._invalidate_results()
 
     def add_route(
         self,
@@ -358,6 +405,7 @@ class VisMap:
         self.fds_slc_height = fds_slc_height
         self._slice_frames = {}
         self.build_obstructions_array()
+        self._invalidate_results()
 
     @staticmethod
     def _describe_slices(slices: Iterable[Any]) -> str:
@@ -771,6 +819,7 @@ class VisMap:
         :return: Boolean vismap indicating whether the sign can be seen (True) from a specific cell or not (False).
         :rtype: np.ndarray
         """
+        self._check_prepared(sign_id)
         non_concealed_cells_array = self.all_sign_non_concealed_cells_array_dict[
             sign_id
         ]
@@ -810,6 +859,7 @@ class VisMap:
         :return: Aggregated boolean visibility map of the shape (ny, nx).
         :rtype: np.ndarray
         """
+        self._check_computed()
         self._check_time_in_computed_range(time)
         time_id = get_id_of_closest_value(self.vismap_time_points, time)
         if route_id is None:
@@ -845,8 +895,8 @@ class VisMap:
 
         A cell is True if at least one of the signs is visible from it at every time point.
 
-        :param t_max: The maximum time to consider. If not specified, all computed time points are used.
-                      Must not exceed the value of ``t_max`` passed to :meth:`compute_all`.
+        :param t_max: The maximum time to consider. If not specified, all time points computed by
+                      :meth:`compute_all` are used, also if it was called with its own ``t_max``.
         :type t_max: float, optional
         :param route_id: ID of the route whose signs are aggregated. If None, all signs are aggregated.
         :type route_id: int or str, optional
@@ -855,20 +905,22 @@ class VisMap:
         :return: Time-aggregated boolean visibility map of the shape (ny, nx).
         :rtype: np.ndarray
         """
-        if t_max is not None:
-            self._check_time_in_computed_range(t_max)
+        max_time = self._get_max_time(t_max)
         maps = [
             self.get_agg_vismap(time, route_id)
             for time in self.vismap_time_points
-            if t_max is None or time <= t_max
+            if time <= max_time
         ]
         return cast(BoolArray, np.logical_and.reduce(maps))
 
     def get_aset_map(
         self, max_time: Optional[float] = None, route_id: Optional[RouteId] = None
-    ) -> IntArray:
+    ) -> FloatArray:
         """
         Generate a map indicating the earliest time at which each point becomes non-visible.
+
+        The times are kept as floats, as :meth:`get_route_aset` does, so that time points with decimals are
+        neither truncated nor confused with the maximum time.
 
         :param max_time: The maximum time to consider. If None, the maximum time computed by :meth:`compute_all` is used.
         :type max_time: float, optional
@@ -883,7 +935,7 @@ class VisMap:
         if self.fds_grid_shape is None:
             raise RuntimeError("FDS data not loaded. Call read_fds_data() first.")
         aset_map = np.full(
-            (self.fds_grid_shape[1], self.fds_grid_shape[0]), max_time, dtype=int
+            (self.fds_grid_shape[1], self.fds_grid_shape[0]), max_time, dtype=float
         )
         for time in self.vismap_time_points:
             if time > max_time:
@@ -1149,13 +1201,12 @@ class VisMap:
         ax: Optional[Axes],
         plot_obstructions: bool,
         flip_y_axis: bool,
-        colorbar: bool,
     ) -> FigureAxes:
         """
         Plot a boolean vismap with one color for cells from which no sign is visible and one for the others.
 
         The color scale is fixed to 0 and 1, so that a map without any visible cell or with only visible cells keeps
-        its colors.
+        its colors. The two colors are described by the legend, see :meth:`_map_color_handles`, not by a colorbar.
 
         :param map_array: Boolean vismap of the shape (ny, nx).
         :type map_array: np.ndarray
@@ -1165,8 +1216,6 @@ class VisMap:
         :type plot_obstructions: bool
         :param flip_y_axis: Flag indicating whether y-axis should be flipped or not to have the origin at bottom left.
         :type flip_y_axis: bool
-        :param colorbar: Flag indicating whether a colorbar is added.
-        :type colorbar: bool
         :return: The figure and the axes of the plot.
         :rtype: (matplotlib.figure.Figure, matplotlib.axes.Axes)
         """
@@ -1178,14 +1227,28 @@ class VisMap:
             flip_y_axis=flip_y_axis,
             vmin=0,
             vmax=1,
-            colorbar=colorbar,
-            cbar_kwargs={
-                "label": None,
-                # Labels in the middle of the two colors
-                "ticks": [0.25, 0.75],
-                "format": mticker.FixedFormatter(["not visible", "visible"]),
-            },
+            colorbar=False,
         )
+
+    def _map_color_handles(self) -> List[Artist]:
+        """
+        Create the legend entries of the two colors of a boolean vismap.
+
+        :return: Legend entries for cells from which no sign is visible and for the others.
+        :rtype: list[matplotlib.artist.Artist]
+        """
+        return [
+            Patch(
+                facecolor=self.style.not_visible,
+                alpha=self.style.map_alpha,
+                label="not visible",
+            ),
+            Patch(
+                facecolor=self.style.visible,
+                alpha=self.style.map_alpha,
+                label="visible",
+            ),
+        ]
 
     def _sign_id_style(self) -> Dict[str, Any]:
         """
@@ -1213,7 +1276,7 @@ class VisMap:
         :type ax: matplotlib.axes.Axes
         :param handles: Legend entries.
         :type handles: list[matplotlib.artist.Artist]
-        :param title: Title of the legend.
+        :param title: Title of the legend, e.g. the name of the route the signs belong to.
         :type title: str, optional
         """
         ax.legend(
@@ -1333,7 +1396,7 @@ class VisMap:
         :type route_id: int or str
         :param coverage: Coverage per point of :meth:`get_route_points`. If None, the route is drawn as one line.
         :type coverage: np.ndarray, optional
-        :return: Legend entries for the starting point and, with a coverage, for the covered sections.
+        :return: Legend entry for the starting point.
         :rtype: list[matplotlib.artist.Artist]
         """
         route = self._get_route(route_id)
@@ -1364,12 +1427,6 @@ class VisMap:
                 )
             )
             end_color = str(colors[-1])
-            handles += [
-                Line2D([], [], color=self.style.route_covered, label="sign visible"),
-                Line2D(
-                    [], [], color=self.style.route_uncovered, label="no sign visible"
-                ),
-            ]
         start = route.waypoints[0]
         ax.scatter(
             [start[0]],
@@ -1481,7 +1538,9 @@ class VisMap:
             route_handles = self._plot_route(ax, route_id)
             handles = self._plot_signs(ax, self._get_route(route_id).signs)
             if legend:
-                self._add_legend(ax, handles + route_handles, title=f"Route {route_id}")
+                self._add_legend(
+                    ax, handles + route_handles, title=f"Route: {route_id}"
+                )
         return fig, ax
 
     def plot_time_agg_vismap(
@@ -1497,7 +1556,7 @@ class VisMap:
         Create a plot visualizing the time-aggregated visibility map for the signs of a route or for all signs.
 
         The map uses the colors ``style.visible`` and ``style.not_visible`` to distinguish whether any sign is
-        visible or not from each cell at every time point. The route is drawn section by section in the colors of
+        visible or not from each cell at every time point, both are described by the legend. The route is drawn section by section in the colors of
         covered and uncovered sections, its signs are marked with their IDs. The contrast factor and the viewing
         angle of each sign are given in a legend to the right of the map.
 
@@ -1524,13 +1583,12 @@ class VisMap:
             ax=ax,
             plot_obstructions=plot_obstructions,
             flip_y_axis=flip_y_axis,
-            colorbar=True,
         )
-        handles, title = self._plot_signs_and_route(
+        sign_handles, title = self._plot_signs_and_route(
             ax, route_id, coverage_map=time_agg_vismap
         )
-        if legend and handles:
-            self._add_legend(ax, handles, title=title)
+        if legend:
+            self._add_legend(ax, self._map_color_handles() + sign_handles, title=title)
         return fig, ax
 
     def plot_vismap(
@@ -1540,7 +1598,6 @@ class VisMap:
         ax: Optional[Axes] = None,
         plot_obstructions: bool = False,
         flip_y_axis: bool = True,
-        colorbar: bool = True,
         legend: bool = True,
         route_id: Optional[RouteId] = None,
     ) -> FigureAxes:
@@ -1548,8 +1605,9 @@ class VisMap:
         Plot the boolean vismap at a time point, either of one sign, of a route or aggregated over all signs.
 
         The time is rounded to the closest time point computed by :meth:`compute_all`. The plot shows the signs
-        with their IDs, their contrast factor and viewing angle are given in a legend to the right of the map. For
-        a route, its polyline is drawn section by section in the colors of covered and uncovered sections.
+        with their IDs. The legend to the right of the map is headed by the name of the route, describes the two
+        colors of the map and lists the signs with their contrast factor and viewing angle. For a route, its polyline is
+        drawn section by section in the colors of covered and uncovered sections.
 
         :param time: Time point in seconds.
         :type time: float
@@ -1561,9 +1619,7 @@ class VisMap:
         :type plot_obstructions: bool, optional
         :param flip_y_axis: Flag indicating whether y-axis should be flipped or not to have the origin at bottom left.
         :type flip_y_axis: bool, optional
-        :param colorbar: Flag indicating whether a colorbar is added. Default is True.
-        :type colorbar: bool, optional
-        :param legend: Flag indicating whether a legend of the signs is added. Default is True.
+        :param legend: Flag indicating whether a legend is added. Default is True.
         :type legend: bool, optional
         :param route_id: ID of the route whose signs are aggregated and whose polyline is drawn. If None, all signs
                          are aggregated.
@@ -1574,8 +1630,7 @@ class VisMap:
         :return: The figure and the axes of the plot.
         :rtype: (matplotlib.figure.Figure, matplotlib.axes.Axes)
         """
-        if not self.all_time_sign_agg_vismap_list:
-            raise RuntimeError("No vismaps computed. Call compute_all() first.")
+        self._check_computed()
         if sign_id is not None and route_id is not None:
             raise ValueError("Pass either a sign or a route, not both.")
         if sign_id is None:
@@ -1591,14 +1646,15 @@ class VisMap:
             ax=ax,
             plot_obstructions=plot_obstructions,
             flip_y_axis=flip_y_axis,
-            colorbar=colorbar,
         )
+        handles: List[Artist] = self._map_color_handles()
         if sign_id is not None:
-            handles: List[Artist] = self._plot_signs(ax, [sign_id])
+            handles += self._plot_signs(ax, [sign_id])
             title: Optional[str] = "Signs"
         else:
-            handles, title = self._plot_signs_and_route(ax, route_id, vismap)
-        if legend and handles:
+            sign_handles, title = self._plot_signs_and_route(ax, route_id, vismap)
+            handles += sign_handles
+        if legend:
             self._add_legend(ax, handles, title=title)
         return fig, ax
 
@@ -1638,9 +1694,11 @@ class VisMap:
 
     def _plot_signs_and_route(
         self, ax: Axes, route_id: Optional[RouteId], coverage_map: BoolArray
-    ) -> Tuple[List[Artist], Optional[str]]:
+    ) -> Tuple[List[Artist], str]:
         """
         Plot the signs of a route together with the route itself, or all signs without a route.
+
+        The name of the route titles the legend the signs are listed in.
 
         :param ax: Axes to plot into.
         :type ax: matplotlib.axes.Axes
@@ -1651,17 +1709,17 @@ class VisMap:
         :return: Legend entries and the title of the legend.
         :rtype: (list[matplotlib.artist.Artist], str)
         """
-        handles: List[Artist] = []
+        route_handles: List[Artist] = []
         if route_id is None:
             sign_ids: List[SignId] = list(self.all_sign_dict)
-            title: Optional[str] = "Signs"
+            title = "Signs"
         else:
             sign_ids = list(self._get_route(route_id).signs)
-            title = f"Route {route_id}"
-            handles += self._plot_route(
+            title = f"Route: {route_id}"
+            route_handles += self._plot_route(
                 ax, route_id, self._coverage_from_vismap(route_id, coverage_map)
             )
-        return self._plot_signs(ax, sign_ids) + handles, title
+        return self._plot_signs(ax, sign_ids) + route_handles, title
 
     def add_background_image(
         self, file: str, extent: Optional[Tuple[float, float, float, float]] = None
@@ -1723,7 +1781,7 @@ class VisMap:
             if t_max is not None
             else self.vismap_time_points
         )
-        self._t_max_computed = float(time_points[-1])
+        self._t_max_computed = float(np.max(time_points))
         self.all_time_all_sign_vismap_list = []
         self.all_time_sign_agg_vismap_list = []
         self.build_help_arrays(
@@ -1787,7 +1845,7 @@ class VisMap:
         :return: The computed visibility value at the given location and time relative to a specific sign.
         :rtype: float
         """
-        self._get_sign_position(sign_id)
+        self._check_prepared(sign_id)
         ref_x_id = get_id_of_closest_value(self.all_x_coords, x)
         ref_y_id = get_id_of_closest_value(self.all_y_coords, y)
         visibility_array = self._get_visibility_array(sign_id, time)
@@ -1815,6 +1873,7 @@ class VisMap:
         :return: A boolean value indicating whether the specified sign is visible from the given location and time.
         :rtype: bool
         """
+        self._check_computed()
         self._check_time_in_computed_range(time)
         time_id = get_id_of_closest_value(self.vismap_time_points, time)
         ref_x_id = get_id_of_closest_value(self.all_x_coords, x)
@@ -1906,6 +1965,7 @@ class VisMap:
         :type y2: float
         """
         self._add_visual_object(x1, x2, y1, y2, self.obstructions_array, False)
+        self._invalidate_results()
 
     def add_visual_obstruction(
         self, x1: float, x2: float, y1: float, y2: float
@@ -1925,3 +1985,4 @@ class VisMap:
         :type y2: float
         """
         self._add_visual_object(x1, x2, y1, y2, self.obstructions_array, True)
+        self._invalidate_results()

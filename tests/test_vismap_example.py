@@ -106,6 +106,50 @@ class TestVisMapBasics:
             vis.add_background_image(bg_img, extent=(22, -2, -1, 11))
 
 
+class TestTimePoints:
+    """Tests for the time points the maps are computed at."""
+
+    @pytest.fixture
+    def sim_dir(self, project_root):
+        """Get the directory of the FDS output of the example."""
+        return str(project_root / "examples" / "room_fire" / "fds_data")
+
+    def computed(self, sim_dir, times):
+        """Compute the maps of two signs at the given time points."""
+        vis = VisMap()
+        vis.read_fds_data(sim_dir, fds_slc_height=2)
+        vis.add_sign(1, 8.4, 4.8, 3, 0)
+        vis.add_sign(2, 9.8, 4, 3, 270)
+        vis.set_time_points(times)
+        vis.compute_all()
+        return vis
+
+    def test_time_points_are_sorted(self, sim_dir):
+        """Test that unsorted time points give the same maps as sorted ones."""
+        ordered = self.computed(sim_dir, [0, 150, 300, 450])
+        shuffled = self.computed(sim_dir, [300, 0, 450, 150])
+
+        np.testing.assert_array_equal(
+            shuffled.vismap_time_points, [0.0, 150.0, 300.0, 450.0]
+        )
+        np.testing.assert_array_equal(ordered.get_aset_map(), shuffled.get_aset_map())
+        for time in (0, 150, 300, 450):
+            np.testing.assert_array_equal(
+                ordered.get_agg_vismap(time), shuffled.get_agg_vismap(time)
+            )
+
+        # The maximum time is the latest one, not the last one that was passed
+        assert shuffled.get_aset_map().max() == 450
+        with pytest.raises(ValueError):
+            shuffled.get_agg_vismap(500)
+
+    def test_duplicate_time_points_are_dropped(self, sim_dir):
+        """Test that a time point given twice is computed once."""
+        vis = self.computed(sim_dir, [0, 300, 300, 150])
+        np.testing.assert_array_equal(vis.vismap_time_points, [0.0, 150.0, 300.0])
+        assert len(vis.all_time_sign_agg_vismap_list) == 3
+
+
 class TestVisibilityCalculations:
     """Tests for visibility calculations."""
 
@@ -172,6 +216,158 @@ class TestVisibilityCalculations:
         assert visibility < 100, f"Visibility {visibility}m seems unreasonably high"
 
 
+class TestPartialComputation:
+    """Tests for evaluations after compute_all was limited with t_max."""
+
+    @pytest.fixture
+    def partial_map(self, project_root):
+        """Compute the maps of two signs up to 200 s, although later time points are set."""
+        vis = VisMap()
+        vis.read_fds_data(
+            str(project_root / "examples" / "room_fire" / "fds_data"), fds_slc_height=2
+        )
+        vis.add_sign(1, 8.4, 4.8, 3, 0)
+        vis.add_sign(2, 9.8, 4, 3, 270)
+        vis.set_time_points(range(0, 500, 50))
+        vis.compute_all(t_max=200)
+        return vis
+
+    def test_time_aggregation_uses_the_computed_time_points(self, partial_map):
+        """Test that the aggregation over time is limited to the computed time points."""
+        computed = [0, 50, 100, 150, 200]
+        expected = np.logical_and.reduce(
+            [partial_map.get_agg_vismap(time) for time in computed]
+        )
+        np.testing.assert_array_equal(partial_map.get_time_agg_vismap(), expected)
+
+        # A shorter period uses its time points only, a longer one is rejected
+        np.testing.assert_array_equal(
+            partial_map.get_time_agg_vismap(100),
+            np.logical_and.reduce(
+                [partial_map.get_agg_vismap(time) for time in (0, 50, 100)]
+            ),
+        )
+        with pytest.raises(ValueError):
+            partial_map.get_time_agg_vismap(300)
+
+    def test_time_aggregated_plot(self, partial_map):
+        """Test that the plot of the time aggregated map works without a time of its own."""
+        fig, ax = partial_map.plot_time_agg_vismap()
+        np.testing.assert_array_equal(
+            np.asarray(ax.get_images()[-1].get_array()).astype(bool),
+            partial_map.get_time_agg_vismap(),
+        )
+        plt.close(fig)
+
+
+class TestStaleResults:
+    """Tests that results are discarded when their input changes."""
+
+    @pytest.fixture
+    def computed(self, project_root):
+        """Compute the maps of two signs at four time points."""
+        vis = VisMap()
+        vis.read_fds_data(
+            str(project_root / "examples" / "room_fire" / "fds_data"), fds_slc_height=2
+        )
+        vis.add_sign(1, 8.4, 4.8, 3, 0)
+        vis.add_sign(2, 9.8, 4, 3, 270)
+        vis.set_time_points([0, 100, 200, 300])
+        vis.compute_all()
+        return vis
+
+    def test_new_time_points_discard_the_maps(self, computed):
+        """Test that a map of an old time point is not returned for a new one."""
+        computed.set_time_points([0, 50])
+        with pytest.raises(RuntimeError):
+            computed.get_agg_vismap(50)
+        with pytest.raises(RuntimeError):
+            computed.get_aset_map()
+
+    def test_a_moved_sign_discards_its_arrays(self, computed):
+        """Test that a sign that is added again with another position does not keep its old arrays."""
+        computed.add_sign(1, 1.0, 1.0, 3, 0)
+        with pytest.raises(RuntimeError):
+            computed.get_sign_vismap(1, 100)
+
+    def test_a_new_sign_discards_the_maps(self, computed):
+        """Test that a sign added after the computation does not raise an IndexError."""
+        computed.add_sign(3, 17, 10, 3, 180)
+        with pytest.raises(RuntimeError):
+            computed.sign_is_visible(100, 5, 5, 3)
+
+    def test_a_new_obstruction_discards_the_maps(self, computed):
+        """Test that an obstruction added after the computation invalidates the maps."""
+        computed.add_visual_obstruction(8, 8.8, 4.6, 4.8)
+        with pytest.raises(RuntimeError):
+            computed.get_agg_vismap(100)
+
+        # After computing again the maps are available, with the obstruction
+        computed.compute_all()
+        assert computed.get_agg_vismap(100).shape == computed.obstructions_array.shape
+
+    def test_getters_before_compute_all(self, project_root):
+        """Test that the getters name the missing computation instead of raising a KeyError."""
+        vis = VisMap()
+        vis.read_fds_data(
+            str(project_root / "examples" / "room_fire" / "fds_data"), fds_slc_height=2
+        )
+        vis.add_sign(1, 8.4, 4.8, 3, 0)
+        vis.set_time_points([0, 100])
+        for call in (
+            lambda: vis.get_sign_vismap(1, 0),
+            lambda: vis.get_agg_vismap(0),
+            lambda: vis.get_visibility_to_sign(0, 2, 4, 1),
+            lambda: vis.sign_is_visible(0, 2, 4, 1),
+        ):
+            with pytest.raises(RuntimeError):
+                call()
+
+        # An unknown ID is still a ValueError, not a missing computation
+        with pytest.raises(ValueError):
+            vis.get_sign_vismap("nowhere", 0)
+
+
+class TestAsetMap:
+    """Tests for the map of the first time without a visible sign."""
+
+    @pytest.fixture
+    def fractional_map(self, project_root):
+        """Compute the maps at time points with decimals."""
+        vis = VisMap()
+        vis.read_fds_data(
+            str(project_root / "examples" / "room_fire" / "fds_data"), fds_slc_height=2
+        )
+        vis.add_sign(1, 8.4, 4.8, 3, 0)
+        vis.add_sign(2, 9.8, 4, 3, 270)
+        vis.set_time_points([0, 112.5, 225, 337.5, 450])
+        vis.compute_all()
+        return vis
+
+    def test_aset_map_keeps_the_time_points(self, fractional_map):
+        """Test that the ASET map holds the first time without a sign, also with decimals."""
+        times = np.asarray(fractional_map.vismap_time_points)
+        not_visible = np.array([~fractional_map.get_agg_vismap(time) for time in times])
+        # The first time point without a visible sign, or the maximum time if one stays visible
+        expected = np.where(
+            not_visible.any(axis=0), times[np.argmax(not_visible, axis=0)], times[-1]
+        )
+
+        aset_map = fractional_map.get_aset_map()
+        assert aset_map.dtype == np.float64
+        np.testing.assert_array_equal(aset_map, expected)
+
+        # Times with decimals occur and are not truncated to full seconds
+        assert set(np.unique(aset_map)) <= set(times)
+        assert (aset_map % 1 != 0).any()
+
+    def test_aset_map_of_a_part_of_the_time(self, fractional_map):
+        """Test that a maximum time with decimals limits the map to the time points below it."""
+        aset_map = fractional_map.get_aset_map(112.5)
+        assert set(np.unique(aset_map)) <= {0.0, 112.5}
+        np.testing.assert_array_equal(aset_map == 0, ~fractional_map.get_agg_vismap(0))
+
+
 class TestPlotGeneration:
     """Tests for plot generation."""
 
@@ -207,7 +403,7 @@ class TestPlotGeneration:
         returned_fig, ax = vis_map.plot_vismap(300, ax=axes[0])
         assert returned_fig is fig
         assert ax is axes[0]
-        vis_map.plot_vismap(300, sign_id=2, ax=axes[1], colorbar=False)
+        vis_map.plot_vismap(300, sign_id=2, ax=axes[1])
 
         # The plotted maps are the computed vismaps, also for sign IDs starting at 1
         aggregated_map = np.asarray(axes[0].get_images()[-1].get_array())
@@ -219,8 +415,8 @@ class TestPlotGeneration:
             sign_map.astype(bool), vis_map.get_sign_vismap(2, 300)
         )
 
-        # Two maps and one colorbar
-        assert len(fig.axes) == 3
+        # Two maps, the colors of the map are in the legend instead of a colorbar
+        assert len(fig.axes) == 2
 
         output_file = tmp_path / "test_vismap.pdf"
         fig.savefig(output_file, dpi=300)
@@ -431,13 +627,15 @@ class TestSignsAndRoutes:
         )
         assert colors == list(expected)
 
-        # One entry per sign of the route, both route colors and the start point
-        labels = [text.get_text() for text in ax.get_legend().get_texts()]
+        # The name of the route as title, the colors of the map and its signs as entries
+        legend = ax.get_legend()
+        assert legend.get_title().get_text() == "Route: west"
+        labels = [text.get_text() for text in legend.get_texts()]
         assert labels == [
+            "not visible",
+            "visible",
             "C = 3, $\\alpha$ = 0$^\\circ$",
             "C = 3, $\\alpha$ = 270$^\\circ$",
-            "sign visible",
-            "no sign visible",
             "start point",
         ]
         plt.close(fig)
