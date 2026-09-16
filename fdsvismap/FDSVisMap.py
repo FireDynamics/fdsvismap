@@ -203,6 +203,48 @@ class VisMap:
         self._slice_frames: Dict[int, Float32Array] = {}
         # ----------------------------------------------------
 
+    def _invalidate_results(self) -> None:
+        """
+        Discard the computed maps and the auxiliary arrays, because their input has changed.
+
+        Signs, time points, obstructions and the visibility bounds all enter the maps. Without discarding the
+        results, a map computed before the change would be returned for the new input.
+        """
+        self.all_time_all_sign_vismap_list = []
+        self.all_time_sign_agg_vismap_list = []
+        self._t_max_computed = None
+        self.all_sign_distance_array_dict = {}
+        self.all_sign_non_concealed_cells_array_dict = {}
+        self.all_sign_non_concealed_cells_xy_idx_dict = {}
+        self.all_sign_angle_array_dict = {}
+        self.all_sign_ray_casting_cache_dict = {}
+
+    def _check_computed(self) -> None:
+        """
+        Raise a RuntimeError if there are no visibility maps for the current input.
+
+        :raises RuntimeError: If :meth:`compute_all` has not been called since the last change of the input.
+        """
+        if not self.all_time_sign_agg_vismap_list:
+            raise RuntimeError(
+                "No vismaps for the current signs, time points and obstructions. Call compute_all() first."
+            )
+
+    def _check_prepared(self, sign_id: SignId) -> None:
+        """
+        Raise a RuntimeError if the auxiliary arrays of a sign are missing.
+
+        :param sign_id: ID of the sign.
+        :type sign_id: int or str
+        :raises ValueError: If there is no sign with this ID.
+        :raises RuntimeError: If the auxiliary arrays have not been built since the last change of the input.
+        """
+        self._get_sign_position(sign_id)
+        if sign_id not in self.all_sign_ray_casting_cache_dict:
+            raise RuntimeError(
+                f"No auxiliary arrays for sign {sign_id}. Call compute_all() first."
+            )
+
     def set_time_points(self, time_points: Sequence[float]) -> None:
         """
         Set the times on which the simulation should be evaluated.
@@ -216,6 +258,7 @@ class VisMap:
         """
         self.vismap_time_points = np.unique(np.asarray(time_points, dtype=float))
         self._release_slice_frames()
+        self._invalidate_results()
 
     def set_visibility_bounds(self, min_vis: float, max_vis: float) -> None:
         """
@@ -229,6 +272,7 @@ class VisMap:
         """
         self.min_vis = min_vis
         self.max_vis = max_vis
+        self._invalidate_results()
 
     def add_sign(
         self,
@@ -259,6 +303,7 @@ class VisMap:
         self.all_sign_dict[sign_id] = Sign(
             x, y, c, None if alpha == "omni" else cast(Optional[float], alpha)
         )
+        self._invalidate_results()
 
     def add_route(
         self,
@@ -360,6 +405,7 @@ class VisMap:
         self.fds_slc_height = fds_slc_height
         self._slice_frames = {}
         self.build_obstructions_array()
+        self._invalidate_results()
 
     @staticmethod
     def _describe_slices(slices: Iterable[Any]) -> str:
@@ -773,6 +819,7 @@ class VisMap:
         :return: Boolean vismap indicating whether the sign can be seen (True) from a specific cell or not (False).
         :rtype: np.ndarray
         """
+        self._check_prepared(sign_id)
         non_concealed_cells_array = self.all_sign_non_concealed_cells_array_dict[
             sign_id
         ]
@@ -812,6 +859,7 @@ class VisMap:
         :return: Aggregated boolean visibility map of the shape (ny, nx).
         :rtype: np.ndarray
         """
+        self._check_computed()
         self._check_time_in_computed_range(time)
         time_id = get_id_of_closest_value(self.vismap_time_points, time)
         if route_id is None:
@@ -1582,8 +1630,7 @@ class VisMap:
         :return: The figure and the axes of the plot.
         :rtype: (matplotlib.figure.Figure, matplotlib.axes.Axes)
         """
-        if not self.all_time_sign_agg_vismap_list:
-            raise RuntimeError("No vismaps computed. Call compute_all() first.")
+        self._check_computed()
         if sign_id is not None and route_id is not None:
             raise ValueError("Pass either a sign or a route, not both.")
         if sign_id is None:
@@ -1798,7 +1845,7 @@ class VisMap:
         :return: The computed visibility value at the given location and time relative to a specific sign.
         :rtype: float
         """
-        self._get_sign_position(sign_id)
+        self._check_prepared(sign_id)
         ref_x_id = get_id_of_closest_value(self.all_x_coords, x)
         ref_y_id = get_id_of_closest_value(self.all_y_coords, y)
         visibility_array = self._get_visibility_array(sign_id, time)
@@ -1826,6 +1873,7 @@ class VisMap:
         :return: A boolean value indicating whether the specified sign is visible from the given location and time.
         :rtype: bool
         """
+        self._check_computed()
         self._check_time_in_computed_range(time)
         time_id = get_id_of_closest_value(self.vismap_time_points, time)
         ref_x_id = get_id_of_closest_value(self.all_x_coords, x)
@@ -1917,6 +1965,7 @@ class VisMap:
         :type y2: float
         """
         self._add_visual_object(x1, x2, y1, y2, self.obstructions_array, False)
+        self._invalidate_results()
 
     def add_visual_obstruction(
         self, x1: float, x2: float, y1: float, y2: float
@@ -1936,3 +1985,4 @@ class VisMap:
         :type y2: float
         """
         self._add_visual_object(x1, x2, y1, y2, self.obstructions_array, True)
+        self._invalidate_results()

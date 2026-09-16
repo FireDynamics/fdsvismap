@@ -260,6 +260,74 @@ class TestPartialComputation:
         plt.close(fig)
 
 
+class TestStaleResults:
+    """Tests that results are discarded when their input changes."""
+
+    @pytest.fixture
+    def computed(self, project_root):
+        """Compute the maps of two signs at four time points."""
+        vis = VisMap()
+        vis.read_fds_data(
+            str(project_root / "examples" / "room_fire" / "fds_data"), fds_slc_height=2
+        )
+        vis.add_sign(1, 8.4, 4.8, 3, 0)
+        vis.add_sign(2, 9.8, 4, 3, 270)
+        vis.set_time_points([0, 100, 200, 300])
+        vis.compute_all()
+        return vis
+
+    def test_new_time_points_discard_the_maps(self, computed):
+        """Test that a map of an old time point is not returned for a new one."""
+        computed.set_time_points([0, 50])
+        with pytest.raises(RuntimeError):
+            computed.get_agg_vismap(50)
+        with pytest.raises(RuntimeError):
+            computed.get_aset_map()
+
+    def test_a_moved_sign_discards_its_arrays(self, computed):
+        """Test that a sign that is added again with another position does not keep its old arrays."""
+        computed.add_sign(1, 1.0, 1.0, 3, 0)
+        with pytest.raises(RuntimeError):
+            computed.get_sign_vismap(1, 100)
+
+    def test_a_new_sign_discards_the_maps(self, computed):
+        """Test that a sign added after the computation does not raise an IndexError."""
+        computed.add_sign(3, 17, 10, 3, 180)
+        with pytest.raises(RuntimeError):
+            computed.sign_is_visible(100, 5, 5, 3)
+
+    def test_a_new_obstruction_discards_the_maps(self, computed):
+        """Test that an obstruction added after the computation invalidates the maps."""
+        computed.add_visual_obstruction(8, 8.8, 4.6, 4.8)
+        with pytest.raises(RuntimeError):
+            computed.get_agg_vismap(100)
+
+        # After computing again the maps are available, with the obstruction
+        computed.compute_all()
+        assert computed.get_agg_vismap(100).shape == computed.obstructions_array.shape
+
+    def test_getters_before_compute_all(self, project_root):
+        """Test that the getters name the missing computation instead of raising a KeyError."""
+        vis = VisMap()
+        vis.read_fds_data(
+            str(project_root / "examples" / "room_fire" / "fds_data"), fds_slc_height=2
+        )
+        vis.add_sign(1, 8.4, 4.8, 3, 0)
+        vis.set_time_points([0, 100])
+        for call in (
+            lambda: vis.get_sign_vismap(1, 0),
+            lambda: vis.get_agg_vismap(0),
+            lambda: vis.get_visibility_to_sign(0, 2, 4, 1),
+            lambda: vis.sign_is_visible(0, 2, 4, 1),
+        ):
+            with pytest.raises(RuntimeError):
+                call()
+
+        # An unknown ID is still a ValueError, not a missing computation
+        with pytest.raises(ValueError):
+            vis.get_sign_vismap("nowhere", 0)
+
+
 class TestAsetMap:
     """Tests for the map of the first time without a visible sign."""
 
