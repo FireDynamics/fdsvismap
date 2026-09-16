@@ -1,5 +1,6 @@
 """Basic tests for fdsvismap example script."""
 
+import itertools
 import warnings
 from pathlib import Path
 
@@ -257,6 +258,134 @@ class TestPartialComputation:
             np.asarray(ax.get_images()[-1].get_array()).astype(bool),
             partial_map.get_time_agg_vismap(),
         )
+        plt.close(fig)
+
+
+class TestRoutesPlot:
+    """Tests for the plot of the routes and signs without a visibility map."""
+
+    @pytest.fixture
+    def layout(self, project_root):
+        """Create signs and two routes that share a sign, without computing anything."""
+        vis = VisMap()
+        vis.read_fds_data(
+            str(project_root / "examples" / "room_fire" / "fds_data"), fds_slc_height=2
+        )
+        vis.add_sign("A", 8.4, 4.8, 3, 0)
+        vis.add_sign("B", 9.8, 4, 3, 270)
+        vis.add_sign("C", 17, 10, 3, 180)
+        vis.add_route("Office", [(1, 9), (7, 5.5), (9.5, 4.2)], signs=["A", "B"])
+        vis.add_route("Hall", [(12, 2), (15, 4), (17, 9.5)], signs=["C", "B"])
+        return vis
+
+    def test_all_routes_without_computation(self, layout):
+        """Test that the routes are drawn in the color of the signs, with their names and the signs."""
+        style = MapStyle()
+        fig, ax = layout.plot_routes()
+
+        # One dashed line per route, all in the same color
+        lines = [line for line in ax.get_lines() if line.get_linestyle() == "--"]
+        assert len(lines) == 2
+        assert {mcolors.to_hex(line.get_color()) for line in lines} == {style.sign}
+        np.testing.assert_array_equal(
+            np.column_stack(lines[0].get_data()),
+            layout.all_route_dict["Office"].waypoints,
+        )
+
+        # The name of each route is written on the map
+        texts = [text.get_text() for text in ax.texts]
+        assert "Office" in texts and "Hall" in texts
+
+        # The legend names the routes a sign belongs to, the start points share one entry
+        labels = [text.get_text() for text in ax.get_legend().get_texts()]
+        assert labels == [
+            "C = 3, $\\alpha$ = 0$^\\circ$ (Office)",
+            "C = 3, $\\alpha$ = 270$^\\circ$ (Office, Hall)",
+            "C = 3, $\\alpha$ = 180$^\\circ$ (Hall)",
+            "start point",
+        ]
+        plt.close(fig)
+
+    def test_a_single_route_with_its_signs(self, layout):
+        """Test that only the given route and the signs that belong to it are plotted."""
+        fig, ax = layout.plot_routes(route_ids=["Hall"])
+        assert (
+            len([line for line in ax.get_lines() if line.get_linestyle() == "--"]) == 1
+        )
+        labels = [text.get_text() for text in ax.get_legend().get_texts()]
+        assert labels == [
+            "C = 3, $\\alpha$ = 180$^\\circ$ (Hall)",
+            "C = 3, $\\alpha$ = 270$^\\circ$ (Hall)",
+            "start point",
+        ]
+        plt.close(fig)
+
+        with pytest.raises(ValueError):
+            layout.plot_routes(route_ids=["nowhere"])
+        plt.close("all")
+
+    def test_route_names_do_not_overlap(self, layout):
+        """Test that the names of routes running along each other are placed apart."""
+        # A second route on exactly the same line as Office
+        layout.add_route("Twin", [(1, 9), (7, 5.5), (9.5, 4.2)], signs=["A"])
+        fig, ax = layout.plot_routes()
+
+        renderer = fig.canvas.get_renderer()
+        names = {"Office", "Hall", "Twin"}
+        name_boxes = [
+            text.get_window_extent(renderer)
+            for text in ax.texts
+            if text.get_text() in names
+        ]
+        assert len(name_boxes) == 3
+        for first, second in itertools.combinations(name_boxes, 2):
+            assert not first.overlaps(second)
+
+        # The names also keep clear of the IDs of the signs
+        id_boxes = [
+            text.get_window_extent(renderer)
+            for text in ax.texts
+            if text.get_text() not in names
+        ]
+        for name_box in name_boxes:
+            assert not any(name_box.overlaps(id_box) for id_box in id_boxes)
+        plt.close(fig)
+
+    def test_route_name_avoids_the_id_of_a_sign(self, project_root):
+        """Test that the name of a route moves when a sign is drawn where it would be written."""
+        vis = VisMap()
+        vis.read_fds_data(
+            str(project_root / "examples" / "room_fire" / "fds_data"), fds_slc_height=2
+        )
+        # The sign sits in the middle of the longest section, where the name goes first
+        vis.add_sign("M", 4.0, 7.25, 3, 0)
+        vis.add_route("Office", [(1, 9), (7, 5.5), (9.5, 4.2)], signs=["M"])
+
+        fig, ax = vis.plot_routes()
+        renderer = fig.canvas.get_renderer()
+        name = next(text for text in ax.texts if text.get_text() == "Office")
+        assert name.get_position() != (4.0, 7.25)
+        assert not any(
+            name.get_window_extent(renderer).overlaps(text.get_window_extent(renderer))
+            for text in ax.texts
+            if text.get_text() == "M"
+        )
+        plt.close(fig)
+
+    def test_no_map_is_drawn(self, layout, project_root):
+        """Test that the plot shows the background image and an empty map, without a colorbar."""
+        layout.add_background_image(
+            project_root / "examples" / "room_fire" / "misc" / "floorplan.png",
+            extent=(0, 20, 0, 10),
+        )
+        fig, ax = layout.plot_routes()
+
+        background, empty_map = ax.get_images()
+        assert tuple(background.get_extent()) == (0, 20, 0, 10)
+        assert np.ma.getmaskarray(empty_map.get_array()).all()
+
+        # No colorbar as a second axes
+        assert len(fig.axes) == 1
         plt.close(fig)
 
 
@@ -683,6 +812,11 @@ class TestSignsAndRoutes:
         # Add obstruction
         vis.add_visual_obstruction(8, 8.8, 4.6, 4.8)
 
+        # Plot the input before any computation
+        fig0, ax0 = vis.plot_routes(plot_obstructions=True)
+        plt.savefig(tmp_path / "test_routes.pdf", dpi=300)
+        plt.close()
+
         # Compute
         vis.compute_all()
 
@@ -718,6 +852,7 @@ class TestSignsAndRoutes:
         assert visibility >= 0
 
         # Check output files exist
+        assert (tmp_path / "test_routes.pdf").exists()
         assert (tmp_path / "test_aset_map.pdf").exists()
         assert (tmp_path / "test_time_agg_vismap.pdf").exists()
         assert (tmp_path / "test_vismap_300s.pdf").exists()
