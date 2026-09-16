@@ -216,6 +216,50 @@ class TestVisibilityCalculations:
         assert visibility < 100, f"Visibility {visibility}m seems unreasonably high"
 
 
+class TestPartialComputation:
+    """Tests for evaluations after compute_all was limited with t_max."""
+
+    @pytest.fixture
+    def partial_map(self, project_root):
+        """Compute the maps of two signs up to 200 s, although later time points are set."""
+        vis = VisMap()
+        vis.read_fds_data(
+            str(project_root / "examples" / "room_fire" / "fds_data"), fds_slc_height=2
+        )
+        vis.add_sign(1, 8.4, 4.8, 3, 0)
+        vis.add_sign(2, 9.8, 4, 3, 270)
+        vis.set_time_points(range(0, 500, 50))
+        vis.compute_all(t_max=200)
+        return vis
+
+    def test_time_aggregation_uses_the_computed_time_points(self, partial_map):
+        """Test that the aggregation over time is limited to the computed time points."""
+        computed = [0, 50, 100, 150, 200]
+        expected = np.logical_and.reduce(
+            [partial_map.get_agg_vismap(time) for time in computed]
+        )
+        np.testing.assert_array_equal(partial_map.get_time_agg_vismap(), expected)
+
+        # A shorter period uses its time points only, a longer one is rejected
+        np.testing.assert_array_equal(
+            partial_map.get_time_agg_vismap(100),
+            np.logical_and.reduce(
+                [partial_map.get_agg_vismap(time) for time in (0, 50, 100)]
+            ),
+        )
+        with pytest.raises(ValueError):
+            partial_map.get_time_agg_vismap(300)
+
+    def test_time_aggregated_plot(self, partial_map):
+        """Test that the plot of the time aggregated map works without a time of its own."""
+        fig, ax = partial_map.plot_time_agg_vismap()
+        np.testing.assert_array_equal(
+            np.asarray(ax.get_images()[-1].get_array()).astype(bool),
+            partial_map.get_time_agg_vismap(),
+        )
+        plt.close(fig)
+
+
 class TestAsetMap:
     """Tests for the map of the first time without a visible sign."""
 

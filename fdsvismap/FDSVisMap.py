@@ -847,8 +847,8 @@ class VisMap:
 
         A cell is True if at least one of the signs is visible from it at every time point.
 
-        :param t_max: The maximum time to consider. If not specified, all computed time points are used.
-                      Must not exceed the value of ``t_max`` passed to :meth:`compute_all`.
+        :param t_max: The maximum time to consider. If not specified, all time points computed by
+                      :meth:`compute_all` are used, also if it was called with its own ``t_max``.
         :type t_max: float, optional
         :param route_id: ID of the route whose signs are aggregated. If None, all signs are aggregated.
         :type route_id: int or str, optional
@@ -857,12 +857,11 @@ class VisMap:
         :return: Time-aggregated boolean visibility map of the shape (ny, nx).
         :rtype: np.ndarray
         """
-        if t_max is not None:
-            self._check_time_in_computed_range(t_max)
+        max_time = self._get_max_time(t_max)
         maps = [
             self.get_agg_vismap(time, route_id)
             for time in self.vismap_time_points
-            if t_max is None or time <= t_max
+            if time <= max_time
         ]
         return cast(BoolArray, np.logical_and.reduce(maps))
 
