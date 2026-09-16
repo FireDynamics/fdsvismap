@@ -20,6 +20,24 @@ def get_id_of_closest_value(values_array: NDArray[np.floating], value: float) ->
     return int((np.abs(values_array - value)).argmin())
 
 
+def get_ids_of_closest_values(
+    values_array: NDArray[np.floating], values: NDArray[np.floating]
+) -> NDArray[np.intp]:
+    """
+    Find the closest value in a sorted coordinate array for each of many values at once.
+
+    :param values_array: Array of values in ascending order, e.g. the cell coordinates of one axis.
+    :type values_array: numpy.ndarray
+    :param values: The values to find the closest values to.
+    :type values: numpy.ndarray
+    :return: The indices of the closest values in the array, one per given value.
+    :rtype: numpy.ndarray
+    """
+    # Insertion points in the array of the midpoints between neighbouring values
+    midpoints = (values_array[:-1] + values_array[1:]) / 2
+    return np.searchsorted(midpoints, np.asarray(values))
+
+
 def count_cells_to_obstruction(
     line_x: NDArray[np.float64],
     line_y: NDArray[np.float64],

@@ -18,10 +18,18 @@ Helper Functions
    :undoc-members:
    :show-inheritance:
 
-Waypoint
---------
+Sign
+----
 
-.. automodule:: fdsvismap.Waypoint
+.. automodule:: fdsvismap.Sign
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Route
+-----
+
+.. automodule:: fdsvismap.Route
    :members:
    :undoc-members:
    :show-inheritance:
