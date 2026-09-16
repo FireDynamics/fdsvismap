@@ -216,6 +216,46 @@ class TestVisibilityCalculations:
         assert visibility < 100, f"Visibility {visibility}m seems unreasonably high"
 
 
+class TestAsetMap:
+    """Tests for the map of the first time without a visible sign."""
+
+    @pytest.fixture
+    def fractional_map(self, project_root):
+        """Compute the maps at time points with decimals."""
+        vis = VisMap()
+        vis.read_fds_data(
+            str(project_root / "examples" / "room_fire" / "fds_data"), fds_slc_height=2
+        )
+        vis.add_sign(1, 8.4, 4.8, 3, 0)
+        vis.add_sign(2, 9.8, 4, 3, 270)
+        vis.set_time_points([0, 112.5, 225, 337.5, 450])
+        vis.compute_all()
+        return vis
+
+    def test_aset_map_keeps_the_time_points(self, fractional_map):
+        """Test that the ASET map holds the first time without a sign, also with decimals."""
+        times = np.asarray(fractional_map.vismap_time_points)
+        not_visible = np.array([~fractional_map.get_agg_vismap(time) for time in times])
+        # The first time point without a visible sign, or the maximum time if one stays visible
+        expected = np.where(
+            not_visible.any(axis=0), times[np.argmax(not_visible, axis=0)], times[-1]
+        )
+
+        aset_map = fractional_map.get_aset_map()
+        assert aset_map.dtype == np.float64
+        np.testing.assert_array_equal(aset_map, expected)
+
+        # Times with decimals occur and are not truncated to full seconds
+        assert set(np.unique(aset_map)) <= set(times)
+        assert (aset_map % 1 != 0).any()
+
+    def test_aset_map_of_a_part_of_the_time(self, fractional_map):
+        """Test that a maximum time with decimals limits the map to the time points below it."""
+        aset_map = fractional_map.get_aset_map(112.5)
+        assert set(np.unique(aset_map)) <= {0.0, 112.5}
+        np.testing.assert_array_equal(aset_map == 0, ~fractional_map.get_agg_vismap(0))
+
+
 class TestPlotGeneration:
     """Tests for plot generation."""
 

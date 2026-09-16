@@ -868,9 +868,12 @@ class VisMap:
 
     def get_aset_map(
         self, max_time: Optional[float] = None, route_id: Optional[RouteId] = None
-    ) -> IntArray:
+    ) -> FloatArray:
         """
         Generate a map indicating the earliest time at which each point becomes non-visible.
+
+        The times are kept as floats, as :meth:`get_route_aset` does, so that time points with decimals are
+        neither truncated nor confused with the maximum time.
 
         :param max_time: The maximum time to consider. If None, the maximum time computed by :meth:`compute_all` is used.
         :type max_time: float, optional
@@ -885,7 +888,7 @@ class VisMap:
         if self.fds_grid_shape is None:
             raise RuntimeError("FDS data not loaded. Call read_fds_data() first.")
         aset_map = np.full(
-            (self.fds_grid_shape[1], self.fds_grid_shape[0]), max_time, dtype=int
+            (self.fds_grid_shape[1], self.fds_grid_shape[0]), max_time, dtype=float
         )
         for time in self.vismap_time_points:
             if time > max_time:
