@@ -207,7 +207,7 @@ class TestPlotGeneration:
         returned_fig, ax = vis_map.plot_vismap(300, ax=axes[0])
         assert returned_fig is fig
         assert ax is axes[0]
-        vis_map.plot_vismap(300, sign_id=2, ax=axes[1], colorbar=False)
+        vis_map.plot_vismap(300, sign_id=2, ax=axes[1])
 
         # The plotted maps are the computed vismaps, also for sign IDs starting at 1
         aggregated_map = np.asarray(axes[0].get_images()[-1].get_array())
@@ -219,8 +219,8 @@ class TestPlotGeneration:
             sign_map.astype(bool), vis_map.get_sign_vismap(2, 300)
         )
 
-        # Two maps and one colorbar
-        assert len(fig.axes) == 3
+        # Two maps, the colors of the map are in the legend instead of a colorbar
+        assert len(fig.axes) == 2
 
         output_file = tmp_path / "test_vismap.pdf"
         fig.savefig(output_file, dpi=300)
@@ -431,13 +431,15 @@ class TestSignsAndRoutes:
         )
         assert colors == list(expected)
 
-        # One entry per sign of the route, both route colors and the start point
-        labels = [text.get_text() for text in ax.get_legend().get_texts()]
+        # The name of the route as title, the colors of the map and its signs as entries
+        legend = ax.get_legend()
+        assert legend.get_title().get_text() == "Route: west"
+        labels = [text.get_text() for text in legend.get_texts()]
         assert labels == [
+            "not visible",
+            "visible",
             "C = 3, $\\alpha$ = 0$^\\circ$",
             "C = 3, $\\alpha$ = 270$^\\circ$",
-            "sign visible",
-            "no sign visible",
             "start point",
         ]
         plt.close(fig)

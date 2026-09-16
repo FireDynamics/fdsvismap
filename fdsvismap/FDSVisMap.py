@@ -19,7 +19,6 @@ from typing import (
 import fdsreader as fds  # type: ignore[import-untyped]
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
-import matplotlib.ticker as mticker
 import numpy as np
 from matplotlib.artist import Artist
 from matplotlib.axes import Axes
@@ -27,6 +26,7 @@ from matplotlib.collections import LineCollection
 from matplotlib.figure import Figure
 from matplotlib.legend_handler import HandlerBase
 from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 from matplotlib.text import Text
 from numpy.typing import ArrayLike, NDArray
 from skimage.draw import line, line_aa
@@ -1149,13 +1149,12 @@ class VisMap:
         ax: Optional[Axes],
         plot_obstructions: bool,
         flip_y_axis: bool,
-        colorbar: bool,
     ) -> FigureAxes:
         """
         Plot a boolean vismap with one color for cells from which no sign is visible and one for the others.
 
         The color scale is fixed to 0 and 1, so that a map without any visible cell or with only visible cells keeps
-        its colors.
+        its colors. The two colors are described by the legend, see :meth:`_map_color_handles`, not by a colorbar.
 
         :param map_array: Boolean vismap of the shape (ny, nx).
         :type map_array: np.ndarray
@@ -1165,8 +1164,6 @@ class VisMap:
         :type plot_obstructions: bool
         :param flip_y_axis: Flag indicating whether y-axis should be flipped or not to have the origin at bottom left.
         :type flip_y_axis: bool
-        :param colorbar: Flag indicating whether a colorbar is added.
-        :type colorbar: bool
         :return: The figure and the axes of the plot.
         :rtype: (matplotlib.figure.Figure, matplotlib.axes.Axes)
         """
@@ -1178,14 +1175,28 @@ class VisMap:
             flip_y_axis=flip_y_axis,
             vmin=0,
             vmax=1,
-            colorbar=colorbar,
-            cbar_kwargs={
-                "label": None,
-                # Labels in the middle of the two colors
-                "ticks": [0.25, 0.75],
-                "format": mticker.FixedFormatter(["not visible", "visible"]),
-            },
+            colorbar=False,
         )
+
+    def _map_color_handles(self) -> List[Artist]:
+        """
+        Create the legend entries of the two colors of a boolean vismap.
+
+        :return: Legend entries for cells from which no sign is visible and for the others.
+        :rtype: list[matplotlib.artist.Artist]
+        """
+        return [
+            Patch(
+                facecolor=self.style.not_visible,
+                alpha=self.style.map_alpha,
+                label="not visible",
+            ),
+            Patch(
+                facecolor=self.style.visible,
+                alpha=self.style.map_alpha,
+                label="visible",
+            ),
+        ]
 
     def _sign_id_style(self) -> Dict[str, Any]:
         """
@@ -1213,7 +1224,7 @@ class VisMap:
         :type ax: matplotlib.axes.Axes
         :param handles: Legend entries.
         :type handles: list[matplotlib.artist.Artist]
-        :param title: Title of the legend.
+        :param title: Title of the legend, e.g. the name of the route the signs belong to.
         :type title: str, optional
         """
         ax.legend(
@@ -1333,7 +1344,7 @@ class VisMap:
         :type route_id: int or str
         :param coverage: Coverage per point of :meth:`get_route_points`. If None, the route is drawn as one line.
         :type coverage: np.ndarray, optional
-        :return: Legend entries for the starting point and, with a coverage, for the covered sections.
+        :return: Legend entry for the starting point.
         :rtype: list[matplotlib.artist.Artist]
         """
         route = self._get_route(route_id)
@@ -1364,12 +1375,6 @@ class VisMap:
                 )
             )
             end_color = str(colors[-1])
-            handles += [
-                Line2D([], [], color=self.style.route_covered, label="sign visible"),
-                Line2D(
-                    [], [], color=self.style.route_uncovered, label="no sign visible"
-                ),
-            ]
         start = route.waypoints[0]
         ax.scatter(
             [start[0]],
@@ -1481,7 +1486,9 @@ class VisMap:
             route_handles = self._plot_route(ax, route_id)
             handles = self._plot_signs(ax, self._get_route(route_id).signs)
             if legend:
-                self._add_legend(ax, handles + route_handles, title=f"Route {route_id}")
+                self._add_legend(
+                    ax, handles + route_handles, title=f"Route: {route_id}"
+                )
         return fig, ax
 
     def plot_time_agg_vismap(
@@ -1497,7 +1504,7 @@ class VisMap:
         Create a plot visualizing the time-aggregated visibility map for the signs of a route or for all signs.
 
         The map uses the colors ``style.visible`` and ``style.not_visible`` to distinguish whether any sign is
-        visible or not from each cell at every time point. The route is drawn section by section in the colors of
+        visible or not from each cell at every time point, both are described by the legend. The route is drawn section by section in the colors of
         covered and uncovered sections, its signs are marked with their IDs. The contrast factor and the viewing
         angle of each sign are given in a legend to the right of the map.
 
@@ -1524,13 +1531,12 @@ class VisMap:
             ax=ax,
             plot_obstructions=plot_obstructions,
             flip_y_axis=flip_y_axis,
-            colorbar=True,
         )
-        handles, title = self._plot_signs_and_route(
+        sign_handles, title = self._plot_signs_and_route(
             ax, route_id, coverage_map=time_agg_vismap
         )
-        if legend and handles:
-            self._add_legend(ax, handles, title=title)
+        if legend:
+            self._add_legend(ax, self._map_color_handles() + sign_handles, title=title)
         return fig, ax
 
     def plot_vismap(
@@ -1540,7 +1546,6 @@ class VisMap:
         ax: Optional[Axes] = None,
         plot_obstructions: bool = False,
         flip_y_axis: bool = True,
-        colorbar: bool = True,
         legend: bool = True,
         route_id: Optional[RouteId] = None,
     ) -> FigureAxes:
@@ -1548,8 +1553,9 @@ class VisMap:
         Plot the boolean vismap at a time point, either of one sign, of a route or aggregated over all signs.
 
         The time is rounded to the closest time point computed by :meth:`compute_all`. The plot shows the signs
-        with their IDs, their contrast factor and viewing angle are given in a legend to the right of the map. For
-        a route, its polyline is drawn section by section in the colors of covered and uncovered sections.
+        with their IDs. The legend to the right of the map is headed by the name of the route, describes the two
+        colors of the map and lists the signs with their contrast factor and viewing angle. For a route, its polyline is
+        drawn section by section in the colors of covered and uncovered sections.
 
         :param time: Time point in seconds.
         :type time: float
@@ -1561,9 +1567,7 @@ class VisMap:
         :type plot_obstructions: bool, optional
         :param flip_y_axis: Flag indicating whether y-axis should be flipped or not to have the origin at bottom left.
         :type flip_y_axis: bool, optional
-        :param colorbar: Flag indicating whether a colorbar is added. Default is True.
-        :type colorbar: bool, optional
-        :param legend: Flag indicating whether a legend of the signs is added. Default is True.
+        :param legend: Flag indicating whether a legend is added. Default is True.
         :type legend: bool, optional
         :param route_id: ID of the route whose signs are aggregated and whose polyline is drawn. If None, all signs
                          are aggregated.
@@ -1591,14 +1595,15 @@ class VisMap:
             ax=ax,
             plot_obstructions=plot_obstructions,
             flip_y_axis=flip_y_axis,
-            colorbar=colorbar,
         )
+        handles: List[Artist] = self._map_color_handles()
         if sign_id is not None:
-            handles: List[Artist] = self._plot_signs(ax, [sign_id])
+            handles += self._plot_signs(ax, [sign_id])
             title: Optional[str] = "Signs"
         else:
-            handles, title = self._plot_signs_and_route(ax, route_id, vismap)
-        if legend and handles:
+            sign_handles, title = self._plot_signs_and_route(ax, route_id, vismap)
+            handles += sign_handles
+        if legend:
             self._add_legend(ax, handles, title=title)
         return fig, ax
 
@@ -1638,9 +1643,11 @@ class VisMap:
 
     def _plot_signs_and_route(
         self, ax: Axes, route_id: Optional[RouteId], coverage_map: BoolArray
-    ) -> Tuple[List[Artist], Optional[str]]:
+    ) -> Tuple[List[Artist], str]:
         """
         Plot the signs of a route together with the route itself, or all signs without a route.
+
+        The name of the route titles the legend the signs are listed in.
 
         :param ax: Axes to plot into.
         :type ax: matplotlib.axes.Axes
@@ -1651,17 +1658,17 @@ class VisMap:
         :return: Legend entries and the title of the legend.
         :rtype: (list[matplotlib.artist.Artist], str)
         """
-        handles: List[Artist] = []
+        route_handles: List[Artist] = []
         if route_id is None:
             sign_ids: List[SignId] = list(self.all_sign_dict)
-            title: Optional[str] = "Signs"
+            title = "Signs"
         else:
             sign_ids = list(self._get_route(route_id).signs)
-            title = f"Route {route_id}"
-            handles += self._plot_route(
+            title = f"Route: {route_id}"
+            route_handles += self._plot_route(
                 ax, route_id, self._coverage_from_vismap(route_id, coverage_map)
             )
-        return self._plot_signs(ax, sign_ids) + handles, title
+        return self._plot_signs(ax, sign_ids) + route_handles, title
 
     def add_background_image(
         self, file: str, extent: Optional[Tuple[float, float, float, float]] = None
