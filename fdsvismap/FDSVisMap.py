@@ -2187,11 +2187,11 @@ class VisMap:
         non_concealed_cells_array = self.all_sign_non_concealed_cells_array_dict[
             sign_id
         ]
-        view_angle_array = self.all_wp_angle_array_dict[waypoint_id]
+        view_angle_array = self.all_sign_angle_array_dict[sign_id]
         # Same product as get_vismap(): smoke, then the sign's readable
         # half-plane, then obstructions. Without the view-angle factor this
         # returned the full clear-air visibility to a viewer standing behind a
-        # directional sign, disagreeing with wp_is_visible() for that viewer.
+        # directional sign, disagreeing with sign_is_visible() for that viewer.
         masked_visibility_array = (
             view_angle_array * visibility_array * non_concealed_cells_array
         )

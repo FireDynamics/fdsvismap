@@ -29,7 +29,7 @@ def scene(extco: float = 0.0, alpha: float | None = None, c: float = 3.0) -> Vis
     vis.set_grid(X, Y)
     vis.set_uniform_extco(extco)
     vis.set_time_points([0.0])
-    vis.set_waypoint(0, SIGN[0], SIGN[1], c=c, alpha=alpha)
+    vis.add_sign(0, SIGN[0], SIGN[1], c=c, alpha=alpha)
     return vis
 
 
@@ -92,9 +92,9 @@ class TestGridSetup:
         vis.set_grid(X, Y)
         vis.set_uniform_extco(0.0, time_points=[0.0, 10.0])
         assert list(vis.vismap_time_points) == [0.0, 10.0]
-        vis.set_waypoint(0, *SIGN, c=3.0, alpha=None)
+        vis.add_sign(0, *SIGN, c=3.0, alpha=None)
         vis.compute_all(view_angle=True, obstructions=True, aa=True)
-        assert vis.get_visibility_to_wp(10.0, 12.0, 5.0, 0) > 0.0
+        assert vis.get_visibility_to_sign(10.0, 12.0, 5.0, 0) > 0.0
 
     def test_a_synthetic_field_supersedes_a_loaded_slice(self):
         vis = scene(extco=0.5)
@@ -123,7 +123,7 @@ class TestGridSetup:
 class TestClearAir:
     def test_unobstructed_sight_line_gives_max_vis(self):
         vis = computed(scene(extco=0.0))
-        assert vis.get_visibility_to_wp(0.0, 12.0, 5.0, 0) == pytest.approx(
+        assert vis.get_visibility_to_sign(0.0, 12.0, 5.0, 0) == pytest.approx(
             vis.max_vis, rel=1e-3
         )
 
@@ -138,20 +138,20 @@ class TestClearAir:
         vis.set_grid(X, Y)
         vis.set_uniform_extco(0.0)
         vis.set_time_points([0.0])
-        vis.set_waypoint(0, 18.0, 5.0, c=3.0, alpha=None)
+        vis.add_sign(0, 18.0, 5.0, c=3.0, alpha=None)
         vis.add_visual_obstruction(9.5, 10.5, 0.0, 4.0)
         computed(vis)
         # (5, 1) -> (18, 5) crosses the wall at y ~ 2.4, below its top.
-        assert vis.get_visibility_to_wp(0.0, 5.0, 1.0, 0) == 0.0
+        assert vis.get_visibility_to_sign(0.0, 5.0, 1.0, 0) == 0.0
         # (5, 6) -> (18, 5) passes over it at y ~ 5.7.
-        assert vis.get_visibility_to_wp(0.0, 5.0, 6.0, 0) > 0.0
+        assert vis.get_visibility_to_sign(0.0, 5.0, 6.0, 0) > 0.0
 
     @pytest.mark.parametrize("extco", [0.1, 0.3, 1.0, 3.0])
     def test_uniform_smoke_follows_the_jin_relation(self, extco):
         """S = C / K, clamped at max_vis."""
         vis = computed(scene(extco=extco))
         expected = min(vis.max_vis, 3.0 / extco)
-        assert vis.get_visibility_to_wp(0.0, 12.0, 5.0, 0) == pytest.approx(
+        assert vis.get_visibility_to_sign(0.0, 12.0, 5.0, 0) == pytest.approx(
             expected, rel=1e-3
         )
 
@@ -159,42 +159,42 @@ class TestClearAir:
         """A light-emitting sign (C = 8) is legible further than a reflecting one."""
         reflecting = computed(scene(extco=1.0, c=3.0))
         emitting = computed(scene(extco=1.0, c=8.0))
-        assert emitting.get_visibility_to_wp(
+        assert emitting.get_visibility_to_sign(
             0.0, 12.0, 5.0, 0
-        ) > reflecting.get_visibility_to_wp(0.0, 12.0, 5.0, 0)
+        ) > reflecting.get_visibility_to_sign(0.0, 12.0, 5.0, 0)
 
 
 class TestViewAngleConsistency:
-    """get_visibility_to_wp and wp_is_visible must apply the same factors.
+    """get_visibility_to_sign and sign_is_visible must apply the same factors.
 
     get_visibility_to_wp previously omitted the view-angle term that
     get_vismap applies, so a viewer standing behind a directional sign was
-    told the sign was fully legible while wp_is_visible said it was not.
+    told the sign was fully legible while sign_is_visible said it was not.
     """
 
     def test_directional_sign_is_dark_from_behind(self):
         vis = computed(scene(extco=0.0, alpha=90))  # readable from the east
-        assert vis.get_visibility_to_wp(0.0, 15.0, 5.0, 0) > 0.0
-        assert vis.get_visibility_to_wp(0.0, 5.0, 5.0, 0) == 0.0
+        assert vis.get_visibility_to_sign(0.0, 15.0, 5.0, 0) > 0.0
+        assert vis.get_visibility_to_sign(0.0, 5.0, 5.0, 0) == 0.0
 
     @pytest.mark.parametrize("x", [5.0, 8.0, 12.0, 15.0])
     def test_the_two_accessors_agree(self, x):
         vis = computed(scene(extco=0.0, alpha=90))
-        visibility = vis.get_visibility_to_wp(0.0, x, 5.0, 0)
+        visibility = vis.get_visibility_to_sign(0.0, x, 5.0, 0)
         distance = math.dist((x, 5.0), SIGN)
-        assert (visibility >= distance) == bool(vis.wp_is_visible(0.0, x, 5.0, 0))
+        assert (visibility >= distance) == bool(vis.sign_is_visible(0.0, x, 5.0, 0))
 
     def test_any_query_time_is_valid_on_a_static_field(self):
         """A uniform field is time-invariant, so t past the computed range must
         resolve to the computed point instead of raising -- otherwise every
         caller of the synthetic route ends up clamping times itself."""
         vis = computed(scene(extco=0.0))
-        assert vis.wp_is_visible(1.0, 12.0, 5.0, 0)
-        assert vis.get_visibility_to_wp(3600.0, 12.0, 5.0, 0) == pytest.approx(
-            vis.get_visibility_to_wp(0.0, 12.0, 5.0, 0)
+        assert vis.sign_is_visible(1.0, 12.0, 5.0, 0)
+        assert vis.get_visibility_to_sign(3600.0, 12.0, 5.0, 0) == pytest.approx(
+            vis.get_visibility_to_sign(0.0, 12.0, 5.0, 0)
         )
 
     def test_omnidirectional_sign_is_readable_from_both_sides(self):
         vis = computed(scene(extco=0.0, alpha=None))
-        assert vis.get_visibility_to_wp(0.0, 15.0, 5.0, 0) > 0.0
-        assert vis.get_visibility_to_wp(0.0, 5.0, 5.0, 0) > 0.0
+        assert vis.get_visibility_to_sign(0.0, 15.0, 5.0, 0) > 0.0
+        assert vis.get_visibility_to_sign(0.0, 5.0, 5.0, 0) > 0.0
