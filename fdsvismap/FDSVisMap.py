@@ -431,7 +431,8 @@ class VisMap:
         smoke. A non-zero value models a uniformly smoke-logged scene.
 
         :param extco: Extinction coefficient in 1/m, applied at every cell.
-        :param time_points: Times the scene is defined at. Defaults to ``[0.0]``;
+        :param time_points: Times the scene is defined at. Defaults to the
+            times of :meth:`set_time_points`, or to ``[0.0]`` if none are set;
             a static field is the same at every time, so one point suffices.
             Sets the evaluation times as well, so a synthetic scene does not
             also need :meth:`set_time_points` before :meth:`compute_all`.
@@ -443,7 +444,13 @@ class VisMap:
         # get_extco_array_at_time() would have to choose between two sources.
         self.slc = None
         self._uniform_extco = float(extco)
-        points = [0.0] if time_points is None else list(time_points)
+        if time_points is not None:
+            points = list(time_points)
+        elif self.vismap_time_points.size:
+            # Times that were set before belong to the scene, not to the field
+            points = list(self.vismap_time_points)
+        else:
+            points = [0.0]
         self.fds_time_points = np.array(points, dtype=float)
         self.set_time_points(points)
 

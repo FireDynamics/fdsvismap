@@ -120,6 +120,36 @@ class TestGridSetup:
         vis.compute_all(view_angle=True, obstructions=True, aa=True)
         assert vis.get_visibility_to_sign(10.0, 12.0, 5.0, 0) > 0.0
 
+    def test_the_field_keeps_the_times_that_were_set(self):
+        """set_uniform_extco supplies times, it does not take them away.
+
+        It defaults to a single point so that a synthetic scene needs no
+        set_time_points. Applied to times the caller had already chosen, that
+        default silently reduced the evaluation to t = 0.
+        """
+        vis = VisMap()
+        vis.set_grid(X, Y)
+        vis.set_time_points([0.0, 60.0, 120.0])
+        vis.set_uniform_extco(0.5)
+        assert list(vis.vismap_time_points) == [0.0, 60.0, 120.0]
+        assert list(vis.fds_time_points) == [0.0, 60.0, 120.0]
+
+        # An explicit argument still wins, and without any times one is supplied
+        vis.set_uniform_extco(0.5, time_points=[0.0, 10.0])
+        assert list(vis.vismap_time_points) == [0.0, 10.0]
+        fresh = VisMap()
+        fresh.set_grid(X, Y)
+        fresh.set_uniform_extco(0.5)
+        assert list(fresh.vismap_time_points) == [0.0]
+
+    def test_a_new_field_discards_the_maps(self):
+        """The extinction field is an input of the maps, as a slice is."""
+        vis = computed(scene(extco=1.0))
+        assert vis.get_agg_vismap(0.0).any()
+        vis.set_uniform_extco(0.0)
+        with pytest.raises(RuntimeError):
+            vis.get_agg_vismap(0.0)
+
     def test_a_synthetic_field_supersedes_a_loaded_slice(self):
         vis = scene(extco=0.5)
         vis.slc = object()  # stand-in for a previously read simulation
