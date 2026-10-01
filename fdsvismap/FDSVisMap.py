@@ -203,7 +203,7 @@ class VisMap:
         self._slice_frames: Dict[int, Float32Array] = {}
         # Set by set_uniform_extco() instead of read_fds_data(), for scenes
         # that have a geometry but no fire.
-        self._uniform_extco: float | None = None
+        self._uniform_extco: Optional[float] = None
         # ----------------------------------------------------
 
     def _invalidate_results(self) -> None:
@@ -339,7 +339,7 @@ class VisMap:
             waypoints=np.asarray(waypoints, dtype=float), signs=sign_ids
         )
 
-    def _grid_shape(self) -> tuple[int, int]:
+    def _grid_shape(self) -> Tuple[int, int]:
         """Return the (nx, ny) sampling grid, or explain what is missing."""
         if self.fds_grid_shape is None:
             raise RuntimeError(
@@ -421,11 +421,11 @@ class VisMap:
         self._invalidate_results()
 
     def set_uniform_extco(
-        self, extco: float = 0.0, time_points: Sequence[float] | None = None
+        self, extco: float = 0.0, time_points: Optional[Sequence[float]] = None
     ) -> None:
         """Use one extinction coefficient everywhere instead of an FDS slice.
 
-        ``extco=0`` is clear air, for which :meth:`get_visibility_to_wp`
+        ``extco=0`` is clear air, for which :meth:`get_visibility_to_sign`
         returns ``max_vis`` wherever a sign is in line of sight and within the
         readable half-plane -- the two terms that survive when there is no
         smoke. A non-zero value models a uniformly smoke-logged scene.
