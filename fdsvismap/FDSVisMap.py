@@ -364,7 +364,8 @@ class VisMap:
         approximated by every caller.
 
         Pair with :meth:`set_uniform_extco` for the extinction field and
-        :meth:`add_visual_obstruction` for the walls.
+        :meth:`add_visual_obstruction` for the walls. Maps that were computed
+        before are discarded, because they belong to the old grid.
 
         :param x_coords: Cell-centre x coordinates, ascending.
         :param y_coords: Cell-centre y coordinates, ascending.
@@ -416,6 +417,8 @@ class VisMap:
         # obstructions_collection and would erase manually added obstructions,
         # so add walls after the grid (or the FDS read), never before a build.
         self.obstructions_array = np.zeros((y.size, x.size), dtype=bool)
+        # Maps of the old grid do not fit the new one, as read_fds_data() does
+        self._invalidate_results()
 
     def set_uniform_extco(
         self, extco: float = 0.0, time_points: Sequence[float] | None = None

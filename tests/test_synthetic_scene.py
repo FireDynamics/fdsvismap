@@ -59,6 +59,30 @@ class TestGridSetup:
         assert vis.obstructions_array.shape == (Y.size, X.size)
         assert vis.obstructions_array.any()
 
+    def test_a_new_grid_discards_the_maps(self):
+        """Maps of the old grid do not fit the new one, so set_grid drops them.
+
+        Without that, the maps of the old grid are indexed with the cells of
+        the new one, which raises an IndexError deep inside the lookup instead
+        of naming the missing computation.
+        """
+        vis = computed(scene())
+        assert vis.get_sign_vismap(0, 0.0).any()
+
+        vis.set_grid(np.arange(0.25, 10.0, 0.5), Y)
+        for call in (
+            lambda: vis.get_sign_vismap(0, 0.0),
+            lambda: vis.get_agg_vismap(0.0),
+            lambda: vis.get_aset_map(),
+        ):
+            with pytest.raises(RuntimeError):
+                call()
+
+        # Computing again gives maps of the new grid
+        vis.set_uniform_extco(0.0)
+        computed(vis)
+        assert vis.get_sign_vismap(0, 0.0).shape == (Y.size, 20)
+
     def test_grid_needs_two_coordinates_per_axis(self):
         vis = VisMap()
         with pytest.raises(ValueError, match="at least two coordinates"):
