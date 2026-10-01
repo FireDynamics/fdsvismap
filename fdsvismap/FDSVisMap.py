@@ -118,6 +118,9 @@ class VisMap:
     :vartype all_y_coords: np.ndarray or None
     :ivar all_x_coords: x-coordinates of the FDS grid. Initialized as None.
     :vartype all_x_coords: np.ndarray or None
+    :ivar visual_objects: Rectangles added with :meth:`add_visual_obstruction` and :meth:`add_visual_hole`, as
+        (x1, x2, y1, y2, obstructed). They are applied again whenever the obstruction array is rebuilt.
+    :vartype visual_objects: list[tuple[float, float, float, float, bool]]
     :ivar obstructions_collection: Collection of obstruction data from FDS simulation. Initialized as None.
     :vartype obstructions_collection: list or None # TODO: check
     :ivar vismap_time_points: Time points for which the visibility maps are created, in ascending order. Initialized as an empty array.
@@ -201,6 +204,9 @@ class VisMap:
         self.fds_slc_height: float = 2.0
         # Slice data per FDS time step index, loaded on first access
         self._slice_frames: Dict[int, Float32Array] = {}
+        # Rectangles of add_visual_obstruction() and add_visual_hole() as
+        # (x1, x2, y1, y2, obstructed), applied again after every rebuild
+        self.visual_objects: List[Tuple[float, float, float, float, bool]] = []
         # Set by set_uniform_extco() instead of read_fds_data(), for scenes
         # that have a geometry but no fire.
         self._uniform_extco: Optional[float] = None
@@ -410,13 +416,12 @@ class VisMap:
             (self.extent[1, 1] - self.extent[1, 0]) / self.fds_grid_shape[1],
         )
         self.fds_slc_height = slc_height
-        # read_fds_data() ends by allocating this, so add_visual_obstruction()
-        # is usable straight after it. Do the same here, or the first manual
-        # obstruction would index an empty array. Note the shared ordering
-        # contract: build_obstructions_array() rebuilds from
-        # obstructions_collection and would erase manually added obstructions,
-        # so add walls after the grid (or the FDS read), never before a build.
-        self.obstructions_array = np.zeros((y.size, x.size), dtype=bool)
+        # read_fds_data() ends by building this, so add_visual_obstruction() is
+        # usable straight after it. Do the same here, or the first manual
+        # obstruction would index an empty array. The build rasterises the
+        # obstructions of a simulation, if one was read, and the rectangles of
+        # add_visual_obstruction() and add_visual_hole() onto the new grid.
+        self.build_obstructions_array()
         # Maps of the old grid do not fit the new one, as read_fds_data() does
         self._invalidate_results()
 
@@ -770,6 +775,9 @@ class VisMap:
         Marks cells in the grid as obstructed based on the
         obstruction objects defined within the FDS simulation. It takes into account the height of the slice
         (fds_slc_height) to determine if an obstruction at a given location blocks visibility.
+
+        The rectangles of :meth:`add_visual_obstruction` and :meth:`add_visual_hole` are applied again
+        afterwards, in the order in which they were added, so that a rebuild does not drop them.
         """
         # Initialize arrays for external collisions and cell obstructions.
         # Sized from the grid rather than from a slice: the obstruction map is
@@ -790,6 +798,10 @@ class VisMap:
                         obstruction_array,
                         True,
                     )
+        for x1, x2, y1, y2, obstructed in self.visual_objects:
+            obstruction_array = self._add_visual_object(
+                x1, x2, y1, y2, obstruction_array, obstructed
+            )
         self.obstructions_array = obstruction_array
 
     def build_help_arrays(
@@ -2348,6 +2360,7 @@ class VisMap:
         :param y2: The y-coordinate of the opposite corner of the rectangle.
         :type y2: float
         """
+        self.visual_objects.append((x1, x2, y1, y2, False))
         self._add_visual_object(x1, x2, y1, y2, self.obstructions_array, False)
         self._invalidate_results()
 
@@ -2368,5 +2381,6 @@ class VisMap:
         :param y2: The y-coordinate of the opposite corner of the rectangle.
         :type y2: float
         """
+        self.visual_objects.append((x1, x2, y1, y2, True))
         self._add_visual_object(x1, x2, y1, y2, self.obstructions_array, True)
         self._invalidate_results()

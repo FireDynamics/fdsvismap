@@ -107,6 +107,60 @@ class TestVisMapBasics:
             vis.add_background_image(bg_img, extent=(22, -2, -1, 11))
 
 
+class TestManualObstructions:
+    """Tests that obstructions and holes added by hand survive a rebuild."""
+
+    @pytest.fixture
+    def with_manual_objects(self, project_root):
+        """Read the example and add a wall with a hole in it."""
+        vis = VisMap()
+        vis.read_fds_data(
+            str(project_root / "examples" / "room_fire" / "fds_data"), fds_slc_height=2
+        )
+        vis.add_visual_obstruction(2, 4, 2, 4)
+        vis.add_visual_hole(2.5, 3.5, 2.5, 3.5)
+        return vis
+
+    def test_a_rebuild_keeps_them(self, with_manual_objects):
+        """build_obstructions_array rebuilds from the simulation and must not drop them."""
+        expected = with_manual_objects.obstructions_array.copy()
+        assert expected.any()
+
+        with_manual_objects.build_obstructions_array()
+        np.testing.assert_array_equal(with_manual_objects.obstructions_array, expected)
+
+    def test_reading_the_simulation_again_keeps_them(
+        self, with_manual_objects, project_root
+    ):
+        """read_fds_data ends with a rebuild, so it kept dropping them as well."""
+        expected = with_manual_objects.obstructions_array.copy()
+        with_manual_objects.read_fds_data(
+            str(project_root / "examples" / "room_fire" / "fds_data"), fds_slc_height=2
+        )
+        np.testing.assert_array_equal(with_manual_objects.obstructions_array, expected)
+
+    def test_they_are_applied_in_the_order_they_were_added(self, project_root):
+        """A hole after a wall opens it, a hole before a wall is covered by it."""
+        sim_dir = str(project_root / "examples" / "room_fire" / "fds_data")
+        wall_then_hole = VisMap()
+        wall_then_hole.read_fds_data(sim_dir, fds_slc_height=2)
+        wall_then_hole.add_visual_obstruction(2, 4, 2, 4)
+        wall_then_hole.add_visual_hole(2.5, 3.5, 2.5, 3.5)
+        hole_then_wall = VisMap()
+        hole_then_wall.read_fds_data(sim_dir, fds_slc_height=2)
+        hole_then_wall.add_visual_hole(2.5, 3.5, 2.5, 3.5)
+        hole_then_wall.add_visual_obstruction(2, 4, 2, 4)
+        assert (
+            wall_then_hole.obstructions_array.sum()
+            < hole_then_wall.obstructions_array.sum()
+        )
+
+        for vis in (wall_then_hole, hole_then_wall):
+            expected = vis.obstructions_array.copy()
+            vis.build_obstructions_array()
+            np.testing.assert_array_equal(vis.obstructions_array, expected)
+
+
 class TestTimePoints:
     """Tests for the time points the maps are computed at."""
 

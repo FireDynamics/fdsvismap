@@ -83,6 +83,30 @@ class TestGridSetup:
         computed(vis)
         assert vis.get_sign_vismap(0, 0.0).shape == (Y.size, 20)
 
+    def test_a_rebuild_keeps_the_obstructions(self):
+        """Without a simulation a rebuild has nothing to rasterise but the walls.
+
+        build_obstructions_array rebuilds from obstructions_collection, which
+        is empty here, so it used to clear the scene completely.
+        """
+        vis = scene()
+        vis.add_visual_obstruction(9.5, 10.5, 0.0, 4.0)
+        expected = vis.obstructions_array.copy()
+        assert expected.any()
+
+        vis.build_obstructions_array()
+        np.testing.assert_array_equal(vis.obstructions_array, expected)
+
+    def test_a_finer_grid_rasterises_the_obstructions_again(self):
+        """set_grid rebuilds, so the walls appear on the new grid."""
+        vis = scene()
+        vis.add_visual_obstruction(9.5, 10.5, 0.0, 4.0)
+        cells = int(vis.obstructions_array.sum())
+
+        vis.set_grid(np.arange(0.125, 20.0, 0.25), np.arange(0.125, 10.0, 0.25))
+        assert vis.obstructions_array.shape == (Y.size * 2, X.size * 2)
+        assert int(vis.obstructions_array.sum()) == pytest.approx(4 * cells, rel=0.3)
+
     def test_grid_needs_two_coordinates_per_axis(self):
         vis = VisMap()
         with pytest.raises(ValueError, match="at least two coordinates"):
