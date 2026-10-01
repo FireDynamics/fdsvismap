@@ -341,11 +341,13 @@ class VisMap:
         sim_dir: str,
         fds_slc_height: float = 2.0,
         fds_slc_id: Optional[str] = None,
+        fds_slc_index: Optional[int] = None,
     ) -> None:
         """
         Read FDS data and store relevant coordinates, shape of the meshgrid, slices and obstructions.
 
-        If defined, the relevant slice file is read by ID, otherwise by quantity and closest to given height.
+        If defined, the relevant slice file is read by index or ID, otherwise by quantity as the horizontal
+        slice closest to the given height.
         The slice data itself is read on first access, see :meth:`get_extco_array_at_time`.
 
         :param sim_dir: Directory where FDS simulation data is stored
@@ -354,10 +356,21 @@ class VisMap:
         :type fds_slc_id: str
         :param fds_slc_height: The height at which to evaluate visibility. Default is 2.
         :type fds_slc_height: float, optional
+        :param fds_slc_index: Index of the slice in ``fdsreader.Simulation(sim_dir).slices``, as listed in the
+            error message. Selects slices without an ID. Default is None.
+        :type fds_slc_index: int, optional
         :raises ValueError: If no matching slice is found. The message lists the available slices.
         """
         sim = fds.Simulation(sim_dir)
-        if fds_slc_id:
+        if fds_slc_index is not None:
+            if not 0 <= fds_slc_index < len(sim.slices):
+                raise ValueError(
+                    f"No slice with index {fds_slc_index} in {sim_dir}. Select one of the available "
+                    f"slices:\n{self._describe_slices(sim.slices)}"
+                )
+            self.slc = sim.slices[fds_slc_index]
+            searched_slice = f"with index {fds_slc_index}"
+        elif fds_slc_id:
             self.slc = sim.slices.get_by_id(fds_slc_id)
             searched_slice = f"with ID {fds_slc_id!r}"
         else:
@@ -377,19 +390,19 @@ class VisMap:
                 fds_quantity = "SOOT OPTICAL DENSITY"
             else:
                 raise ValueError(f"Unsupported quantity: {self.quantity}")
-            self.slc = sim.slices.filter_by_quantity(fds_quantity).get_nearest(
-                0, 0, fds_slc_height
+            self.slc = self._get_nearest_horizontal_slice(
+                sim.slices.filter_by_quantity(fds_quantity), fds_slc_height
             )
             searched_slice = f"with quantity {fds_quantity!r}"
         if self.slc is None:
             raise ValueError(
                 f"No slice {searched_slice} found in {sim_dir}. Select one of the available slices "
-                f"with fds_slc_id:\n{self._describe_slices(sim.slices)}"
+                f"with fds_slc_index or fds_slc_id:\n{self._describe_slices(sim.slices)}"
             )
-        if fds_slc_id:
+        if fds_slc_index is not None or fds_slc_id:
             logger.info(
-                "Slice with ID %s was selected, its quantity is not checked and treated as %s.",
-                fds_slc_id,
+                "Slice %s was selected, its quantity is not checked and treated as %s.",
+                searched_slice,
                 self.quantity,
             )
         self.extent = np.array(self.slc.extent._extents)
@@ -408,6 +421,23 @@ class VisMap:
         self._invalidate_results()
 
     @staticmethod
+    def _get_nearest_horizontal_slice(slices: Iterable[Any], height: float) -> Any:
+        """
+        Get the horizontal slice closest to the given height; ties go to the slice declared first.
+
+        :param slices: Slices of an FDS simulation.
+        :type slices: fdsreader.slcf.SliceCollection
+        :param height: Height in m.
+        :type height: float
+        :return: The closest horizontal slice, or None if there is none.
+        :rtype: fdsreader.slcf.Slice or None
+        """
+        horizontal = [slc for slc in slices if slc.orientation == 3]
+        if not horizontal:
+            return None
+        return min(horizontal, key=lambda slc: abs(slc.extent.z_start - height))
+
+    @staticmethod
     def _describe_slices(slices: Iterable[Any]) -> str:
         """
         Describe FDS slices by ID, quantity and position, one slice per line.
@@ -418,13 +448,15 @@ class VisMap:
         :rtype: str
         """
         lines = []
-        for slc in slices:
+        for index, slc in enumerate(slices):
             if slc.orientation == 0:
                 position = "3D"
             else:
                 axis = ("x", "y", "z")[slc.orientation - 1]
                 position = f"{axis} = {slc.extent[axis][0]:.2f} m"
-            lines.append(f"  {slc.id or '(no ID)'}: {slc.quantity.name}, {position}")
+            lines.append(
+                f"  [{index}] {slc.id or '(no ID)'}: {slc.quantity.name}, {position}"
+            )
         return "\n".join(lines) if lines else "  (none)"
 
     def _get_required_time_indices(self) -> Set[int]:
