@@ -205,6 +205,44 @@ class TestTimePoints:
         assert len(vis.all_time_sign_agg_vismap_list) == 3
 
 
+class TestEmptyTimePoints:
+    """Tests for evaluations without any time point to compute."""
+
+    @pytest.fixture
+    def with_a_sign(self, project_root):
+        """Read the example and add one sign, but set no time points."""
+        vis = VisMap()
+        vis.read_fds_data(
+            str(project_root / "examples" / "room_fire" / "fds_data"), fds_slc_height=2
+        )
+        vis.add_sign(1, 8.4, 4.8, 3, 0)
+        return vis
+
+    def test_compute_all_without_time_points(self, with_a_sign):
+        """The message names set_time_points instead of failing inside numpy."""
+        with pytest.raises(ValueError, match="set_time_points"):
+            with_a_sign.compute_all()
+
+    def test_compute_all_with_a_t_max_below_every_time_point(self, with_a_sign):
+        """A t_max below the first time point selects nothing, which is worth saying."""
+        with_a_sign.set_time_points([100, 200, 300])
+        with pytest.raises(ValueError, match="t_max=50"):
+            with_a_sign.compute_all(t_max=50)
+
+        # A t_max that selects something still works
+        with_a_sign.compute_all(t_max=200)
+        assert len(with_a_sign.all_time_sign_agg_vismap_list) == 2
+
+    def test_the_maximum_time_without_any(self, with_a_sign):
+        """Getters that fall back to the last time point say what is missing."""
+        for call in (
+            lambda: with_a_sign.get_aset_map(),
+            lambda: with_a_sign.get_time_agg_vismap(),
+        ):
+            with pytest.raises(ValueError, match="set_time_points"):
+                call()
+
+
 class TestVisibilityCalculations:
     """Tests for visibility calculations."""
 

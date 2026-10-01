@@ -1135,16 +1135,19 @@ class VisMap:
 
         :param max_time: Requested maximum time. If None, the maximum time computed by :meth:`compute_all` is used.
         :type max_time: float, optional
-        :raises ValueError: If ``max_time`` exceeds the maximum time computed by :meth:`compute_all`.
+        :raises ValueError: If ``max_time`` exceeds the maximum time computed by :meth:`compute_all`, or if
+                            there is no time to fall back to.
         :return: The maximum time.
         :rtype: float
         """
         if max_time is None:
-            return (
-                self._t_max_computed
-                if self._t_max_computed is not None
-                else self.vismap_time_points[-1]
-            )
+            if self._t_max_computed is not None:
+                return self._t_max_computed
+            if not self.vismap_time_points.size:
+                raise ValueError(
+                    "No time points. Call set_time_points() and compute_all() first."
+                )
+            return float(self.vismap_time_points[-1])
         self._check_time_in_computed_range(max_time)
         return max_time
 
@@ -2164,12 +2167,22 @@ class VisMap:
         :param progress: Determines if progress bars are shown while the signs are prepared and the vismaps are
                          computed. Default is False.
         :type progress: bool
+        :raises ValueError: If no time points are set, or none of them is up to ``t_max``.
         """
         time_points = (
             self.vismap_time_points[self.vismap_time_points <= t_max]
             if t_max is not None
             else self.vismap_time_points
         )
+        if not time_points.size:
+            if not self.vismap_time_points.size:
+                raise ValueError(
+                    "No time points to compute. Call set_time_points() first."
+                )
+            raise ValueError(
+                f"No time point up to t_max={t_max}. The time points are "
+                f"{list(self.vismap_time_points)}."
+            )
         self._t_max_computed = float(np.max(time_points))
         self.all_time_all_sign_vismap_list = []
         self.all_time_sign_agg_vismap_list = []
