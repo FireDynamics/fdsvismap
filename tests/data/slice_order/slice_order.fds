@@ -1,0 +1,19 @@
+Slices of one quantity in an order that the height lookup must not depend on:
+an unnamed vertical slice through x = y = 0 first, then unnamed horizontal
+slices from top to bottom. The smoke layer makes K grow with height, so a
+wrong slice gives a different extinction coefficient.
+
+&HEAD CHID='slice_order' /
+&MESH IJK=16,16,12, XB=-2.0,2.0,-2.0,2.0,0.0,3.0 /
+&TIME T_END=20.0 /
+&DUMP NFRAMES=4, SMOKE3D=.FALSE. /
+&REAC FUEL='PROPANE', SOOT_YIELD=0.1 /
+&SURF ID='BURNER', HRRPUA=1000.0 /
+&OBST XB=1.0,1.5,1.0,1.5,0.0,0.25, SURF_IDS='BURNER','INERT','INERT' /
+
+&SLCF PBY=0.0, QUANTITY='EXTINCTION COEFFICIENT' /
+&SLCF PBZ=2.5, QUANTITY='EXTINCTION COEFFICIENT', CELL_CENTERED=T /
+&SLCF PBZ=1.5, QUANTITY='EXTINCTION COEFFICIENT', CELL_CENTERED=T /
+&SLCF PBZ=0.5, QUANTITY='EXTINCTION COEFFICIENT', CELL_CENTERED=T /
+
+&TAIL /

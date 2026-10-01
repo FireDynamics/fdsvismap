@@ -78,10 +78,10 @@ Or for optical density:
 ```
 
 - `PBZ=2.0` sets the z-coordinate (position) of the slice plane (adjust as needed).
-- The slice plane height (z-coordinate, corresponding to `PBZ` in FDS) is selected in Python via `fds_slc_height`.
+- The slice plane height (z-coordinate, corresponding to `PBZ` in FDS) is selected in Python via `fds_slc_height`. The horizontal slice closest to that height is read.
 - `CELL_CENTERED=T` writes the values at the cell centres, as in the examples of this repository.
 - In the FDS output, these quantities are named `SOOT EXTINCTION COEFFICIENT` and `SOOT OPTICAL DENSITY`. FDS does not accept these names in the input file.
-- If smoke is defined as a separate species (`SPEC_ID`), the quantity is named after the species, e.g. `MY SMOKE EXTINCTION COEFFICIENT`. Select such a slice by its ID with `fds_slc_id`.
+- If smoke is defined as a separate species (`SPEC_ID`), the quantity is named after the species, e.g. `MY SMOKE EXTINCTION COEFFICIENT`. Select such a slice by its ID with `fds_slc_id`, or by its index in `fdsreader.Simulation(sim_dir).slices` with `fds_slc_index` if it has no ID. The error message for a missing slice lists the slices with their index.
 
 ### Supported Quantities
 
