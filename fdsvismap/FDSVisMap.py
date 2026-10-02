@@ -31,6 +31,7 @@ from matplotlib.text import Text
 from numpy.typing import ArrayLike, NDArray
 from skimage.draw import line, line_aa
 
+from fdsvismap._deprecation import deprecated_attribute, warn_deprecated
 from fdsvismap.helper_functions import (
     count_cells_to_obstruction,
     get_id_of_closest_value,
@@ -108,7 +109,9 @@ class VisMap:
     position, one viewing direction and a contrast factor, its visibility map does not depend on any route and is
     computed only once (:meth:`add_sign`). A route is a polyline of waypoints together with the signs that guide
     along it, which do not have to lie on it (:meth:`add_route`). From that follow the maps of a route and its
-    coverage, the share of its length from which a sign is visible (:meth:`get_route_coverage`).
+    coverage, the share of its length from which a sign is visible (:meth:`get_route_coverage`). The names of
+    the waypoint API of fdsvismap 0.2 are kept as deprecated aliases at the end of the class, the README lists
+    their replacements.
 
     :ivar obstructions_array: Array indicating obstructed cells in the FDS simulation. Initialized as None.
     :vartype obstruction_array: np.ndarray or None
@@ -210,6 +213,9 @@ class VisMap:
         # Set by set_uniform_extco() instead of read_fds_data(), for scenes
         # that have a geometry but no fire.
         self._uniform_extco: Optional[float] = None
+        # Start point of set_start_point() of the 0.2 API, drawn only by
+        # create_time_agg_wp_agg_vismap_plot(). It does not enter any map.
+        self._legacy_start_point: Optional[Tuple[float, float]] = None
         # ----------------------------------------------------
 
     def _invalidate_results(self) -> None:
@@ -2397,3 +2403,312 @@ class VisMap:
         self.visual_objects.append((x1, x2, y1, y2, True))
         self._add_visual_object(x1, x2, y1, y2, self.obstructions_array, True)
         self._invalidate_results()
+
+    # ------------------------------------------------------------------
+    # Deprecated 0.2 API. The waypoints of 0.2 were replaced by signs and
+    # routes in 0.3. These aliases warn and forward to their replacements,
+    # see the migration table in the README. Remove this block together
+    # with fdsvismap/Waypoint.py and fdsvismap/_deprecation.py in 1.0.
+    # ------------------------------------------------------------------
+
+    def set_waypoint(
+        self,
+        waypoint_id: SignId,
+        x: float,
+        y: float,
+        c: float,
+        alpha: Union[float, None, Literal["omni"]],
+    ) -> None:
+        """
+        Add a waypoint, the former name of a sign.
+
+        .. deprecated:: 0.3.0
+            Use :meth:`add_sign` with the same arguments. The route through the waypoints is given to
+            :meth:`add_route` separately.
+
+        :param waypoint_id: ID of the waypoint, see ``sign_id`` of :meth:`add_sign`.
+        :type waypoint_id: int or str
+        :param x: x-coordinate of the waypoint referring to global FDS coordinates.
+        :type x: float
+        :param y: y-coordinate of the waypoint referring to global FDS coordinates.
+        :type y: float
+        :param c: Contrast factor of the exit sign according to Jin.
+        :type c: float
+        :param alpha: Orientation angle of the exit sign according to global FDS coordinates, None for a sign
+                      that is visible from all directions.
+        :type alpha: float or None
+        """
+        warn_deprecated("set_waypoint()", "add_sign()")
+        self.add_sign(waypoint_id, x, y, c, alpha)
+
+    def get_vismap(self, waypoint_id: SignId, time: float) -> BoolArray:
+        """
+        Generate the boolean vismap of a single waypoint at a given time.
+
+        .. deprecated:: 0.3.0
+            Use :meth:`get_sign_vismap`.
+
+        :param waypoint_id: ID of the waypoint.
+        :type waypoint_id: int or str
+        :param time: The simulation time at which to evaluate visibility.
+        :type time: float
+        :return: Boolean vismap indicating whether the waypoint can be seen (True) from a cell or not (False).
+        :rtype: np.ndarray
+        """
+        warn_deprecated("get_vismap()", "get_sign_vismap()")
+        return self.get_sign_vismap(waypoint_id, time)
+
+    def get_wp_agg_vismap(self, time: float) -> BoolArray:
+        """
+        Get the boolean vismap at a point in time, aggregated over all waypoints.
+
+        .. deprecated:: 0.3.0
+            Use :meth:`get_agg_vismap`, which aggregates over all signs without a ``route_id`` and over the
+            signs of a route with one.
+
+        :param time: Time point for which to get the visibility map.
+        :type time: float
+        :return: Aggregated boolean visibility map of the shape (ny, nx).
+        :rtype: np.ndarray
+        """
+        warn_deprecated("get_wp_agg_vismap()", "get_agg_vismap()")
+        return self.get_agg_vismap(time)
+
+    def get_time_agg_wp_agg_vismap(self, t_max: Optional[float] = None) -> BoolArray:
+        """
+        Get the boolean vismap aggregated over time and over all waypoints.
+
+        .. deprecated:: 0.3.0
+            Use :meth:`get_time_agg_vismap`.
+
+        :param t_max: The maximum time to consider. If not specified, all computed time points are used.
+        :type t_max: float, optional
+        :return: Time-aggregated boolean visibility map of the shape (ny, nx).
+        :rtype: np.ndarray
+        """
+        warn_deprecated("get_time_agg_wp_agg_vismap()", "get_time_agg_vismap()")
+        return self.get_time_agg_vismap(t_max)
+
+    def get_visibility_to_wp(
+        self, time: float, x: float, y: float, waypoint_id: SignId
+    ) -> float:
+        """
+        Calculate the visibility of a waypoint at the cell closest to the given x, y coordinates.
+
+        .. deprecated:: 0.3.0
+            Use :meth:`get_visibility_to_sign`. Unlike 0.2, the viewing angle of the sign is taken into
+            account, as it is in the vismaps.
+
+        :param time: The simulation time at which to calculate the visibility.
+        :type time: float
+        :param x: The x-coordinate of the location.
+        :type x: float
+        :param y: The y-coordinate of the location.
+        :type y: float
+        :param waypoint_id: ID of the waypoint.
+        :type waypoint_id: int or str
+        :return: The visibility at the given location and time relative to the waypoint.
+        :rtype: float
+        """
+        warn_deprecated("get_visibility_to_wp()", "get_visibility_to_sign()")
+        return self.get_visibility_to_sign(time, x, y, waypoint_id)
+
+    def wp_is_visible(
+        self, time: float, x: float, y: float, waypoint_id: SignId
+    ) -> bool:
+        """
+        Determine if a waypoint is visible from the cell closest to the given x, y coordinates.
+
+        .. deprecated:: 0.3.0
+            Use :meth:`sign_is_visible`. Unlike 0.2, the waypoint is looked up by its ID, not by its position
+            in the order of insertion.
+
+        :param time: The simulation time for which visibility is checked.
+        :type time: float
+        :param x: The x-coordinate of the location.
+        :type x: float
+        :param y: The y-coordinate of the location.
+        :type y: float
+        :param waypoint_id: ID of the waypoint.
+        :type waypoint_id: int or str
+        :return: Whether the waypoint is visible from the given location at the given time.
+        :rtype: bool
+        """
+        warn_deprecated("wp_is_visible()", "sign_is_visible()")
+        return self.sign_is_visible(time, x, y, waypoint_id)
+
+    def get_distance_to_wp(self, x: float, y: float, waypoint_id: SignId) -> float:
+        """
+        Calculate the distance from the given x, y coordinates to a waypoint.
+
+        .. deprecated:: 0.3.0
+            Use :meth:`get_distance_to_sign`.
+
+        :param x: The x-coordinate of the location.
+        :type x: float
+        :param y: The y-coordinate of the location.
+        :type y: float
+        :param waypoint_id: ID of the waypoint.
+        :type waypoint_id: int or str
+        :return: The distance to the waypoint from the given location.
+        :rtype: float
+        """
+        warn_deprecated("get_distance_to_wp()", "get_distance_to_sign()")
+        return self.get_distance_to_sign(x, y, waypoint_id)
+
+    def set_start_point(self, x: float, y: float) -> None:
+        """
+        Set the starting point of the route of egress of the 0.2 API.
+
+        .. deprecated:: 0.3.0
+            Give the starting point as the first waypoint of :meth:`add_route`. The stored point is only drawn
+            by :meth:`create_time_agg_wp_agg_vismap_plot`, it does not enter any map.
+
+        :param x: x-coordinate of the starting point referring to global FDS coordinates.
+        :type x: float
+        :param y: y-coordinate of the starting point referring to global FDS coordinates.
+        :type y: float
+        """
+        warn_deprecated("set_start_point()", "the first waypoint of add_route()")
+        self._legacy_start_point = (x, y)
+
+    @property
+    def start_point(self) -> Optional[Tuple[float, float]]:
+        """
+        Starting point given to :meth:`set_start_point`, None if it was not called.
+
+        .. deprecated:: 0.3.0
+            The starting point is the first waypoint of a route, see :meth:`add_route`.
+        """
+        warn_deprecated(
+            "The attribute start_point", "the first waypoint of add_route()"
+        )
+        return self._legacy_start_point
+
+    @start_point.setter
+    def start_point(self, value: Optional[Tuple[float, float]]) -> None:
+        warn_deprecated(
+            "The attribute start_point", "the first waypoint of add_route()"
+        )
+        self._legacy_start_point = value
+
+    def create_aset_map_plot(
+        self,
+        max_time: Optional[float] = None,
+        plot_obstructions: bool = False,
+        flip_y_axis: bool = True,
+    ) -> FigureAxes:
+        """
+        Create a plot of the ASET map, the former name of :meth:`plot_aset_map`.
+
+        .. deprecated:: 0.3.0
+            Use :meth:`plot_aset_map`, which also takes ``ax``, ``route_id`` and ``legend``. The plot has the
+            style of 0.3, the colormap ``style.aset_cmap`` and a legend.
+
+        :param max_time: The maximum time value to consider for the ASET calculations. If None, it defaults to
+                         the last computed time point.
+        :type max_time: float, optional
+        :param plot_obstructions: Flag indicating whether obstructions at the evaluation height are plotted.
+        :type plot_obstructions: bool, optional
+        :param flip_y_axis: Flag indicating whether the y-axis is flipped to have the origin at the bottom left.
+        :type flip_y_axis: bool, optional
+        :return: The figure and the axes of the plot.
+        :rtype: (matplotlib.figure.Figure, matplotlib.axes.Axes)
+        """
+        warn_deprecated("create_aset_map_plot()", "plot_aset_map()")
+        return self.plot_aset_map(
+            max_time=max_time,
+            plot_obstructions=plot_obstructions,
+            flip_y_axis=flip_y_axis,
+        )
+
+    def create_time_agg_wp_agg_vismap_plot(
+        self,
+        t_max: Optional[float] = None,
+        plot_obstructions: bool = False,
+        flip_y_axis: bool = True,
+    ) -> FigureAxes:
+        """
+        Create a plot of the time aggregated vismap of all waypoints, the former name of :meth:`plot_time_agg_vismap`.
+
+        .. deprecated:: 0.3.0
+            Use :meth:`plot_time_agg_vismap`. With a ``route_id`` it draws the route section by section in the
+            colors of covered and uncovered sections. This alias aggregates over all signs and, if
+            :meth:`set_start_point` was called, draws the dashed line from the start point through the
+            waypoints in the order they were added, as 0.2 did.
+
+        :param t_max: The maximum time to consider. If not specified, all computed time points are used.
+        :type t_max: float, optional
+        :param plot_obstructions: Flag indicating whether obstructions at the evaluation height are plotted.
+        :type plot_obstructions: bool, optional
+        :param flip_y_axis: Flag indicating whether the y-axis is flipped to have the origin at the bottom left.
+        :type flip_y_axis: bool, optional
+        :return: The figure and the axes of the plot.
+        :rtype: (matplotlib.figure.Figure, matplotlib.axes.Axes)
+        """
+        warn_deprecated(
+            "create_time_agg_wp_agg_vismap_plot()", "plot_time_agg_vismap()"
+        )
+        fig, ax = self.plot_time_agg_vismap(
+            t_max=t_max, plot_obstructions=plot_obstructions, flip_y_axis=flip_y_axis
+        )
+        self._plot_legacy_trajectory(ax)
+        return fig, ax
+
+    def _plot_legacy_trajectory(self, ax: Axes) -> None:
+        """
+        Draw the dashed line from the start point of :meth:`set_start_point` through all signs, as 0.2 did.
+
+        Nothing is drawn if :meth:`set_start_point` was not called. The axes limits were fixed by
+        :meth:`plot_map`, so the line does not rescale the map.
+
+        :param ax: Axes of the map.
+        :type ax: matplotlib.axes.Axes
+        """
+        if self._legacy_start_point is None:
+            return
+        signs = list(self.all_sign_dict.values())
+        x_values = [self._legacy_start_point[0], *(sign.x for sign in signs)]
+        y_values = [self._legacy_start_point[1], *(sign.y for sign in signs)]
+        ax.plot(
+            x_values,
+            y_values,
+            color=self.style.sign,
+            linestyle="--",
+            linewidth=1,
+            zorder=2,
+        )
+        ax.scatter(
+            [x_values[0]],
+            [y_values[0]],
+            facecolor=self.style.start_point_face,
+            edgecolor=self.style.start_point_edge,
+            zorder=3,
+        )
+
+    # Renamed attributes, documented as :ivar: in 0.2. Each one warns and
+    # forwards to the attribute of the same meaning.
+    all_wp_dict = deprecated_attribute("all_wp_dict", "all_sign_dict")
+    all_wp_distance_array_dict = deprecated_attribute(
+        "all_wp_distance_array_dict", "all_sign_distance_array_dict"
+    )
+    all_wp_non_concealed_cells_array_dict = deprecated_attribute(
+        "all_wp_non_concealed_cells_array_dict",
+        "all_sign_non_concealed_cells_array_dict",
+    )
+    all_wp_angle_array_dict = deprecated_attribute(
+        "all_wp_angle_array_dict", "all_sign_angle_array_dict"
+    )
+    all_time_all_wp_vismap_array_list = deprecated_attribute(
+        "all_time_all_wp_vismap_array_list", "all_time_all_sign_vismap_list"
+    )
+    all_wp_non_concealed_cells_xy_idx_dict = deprecated_attribute(
+        "all_wp_non_concealed_cells_xy_idx_dict",
+        "all_sign_non_concealed_cells_xy_idx_dict",
+    )
+    all_wp_ray_casting_cache_dict = deprecated_attribute(
+        "all_wp_ray_casting_cache_dict", "all_sign_ray_casting_cache_dict"
+    )
+    all_time_wp_agg_vismap_list = deprecated_attribute(
+        "all_time_wp_agg_vismap_list", "all_time_sign_agg_vismap_list"
+    )
