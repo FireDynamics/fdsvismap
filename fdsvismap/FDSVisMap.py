@@ -109,7 +109,9 @@ class VisMap:
     position, one viewing direction and a contrast factor, its visibility map does not depend on any route and is
     computed only once (:meth:`add_sign`). A route is a polyline of waypoints together with the signs that guide
     along it, which do not have to lie on it (:meth:`add_route`). From that follow the maps of a route and its
-    coverage, the share of its length from which a sign is visible (:meth:`get_route_coverage`).
+    coverage, the share of its length from which a sign is visible (:meth:`get_route_coverage`). The names of
+    the waypoint API of fdsvismap 0.2 are kept as deprecated aliases at the end of the class, the README lists
+    their replacements.
 
     :ivar obstructions_array: Array indicating obstructed cells in the FDS simulation. Initialized as None.
     :vartype obstruction_array: np.ndarray or None
