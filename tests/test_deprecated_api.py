@@ -283,3 +283,51 @@ class TestAttributeAliases:
             "non_concealed_x_idx",
             "non_concealed_y_idx",
         }
+
+
+class TestLegacyExampleWorkflow:
+    """The usage example of the 0.2 README, run unchanged against the FDS data of the room fire example."""
+
+    def test_the_0_2_example_runs_and_agrees_with_the_new_api(self, tmp_path):
+        from pathlib import Path
+
+        example_dir = Path(__file__).parent.parent / "examples" / "room_fire"
+        vis = VisMap()
+        vis.read_fds_data(str(example_dir / "fds_data"), fds_slc_height=2)
+        vis.add_background_image(example_dir / "misc" / "floorplan.png")
+        with pytest.warns(DeprecationWarning):
+            vis.set_start_point(1, 9)
+            vis.set_waypoint(1, 8.4, 4.8, 3, 0)
+            vis.set_waypoint(2, 9.8, 4, 3, 270)
+            vis.set_waypoint(3, 17, 10, 3, 180)
+        vis.set_time_points(range(0, 500, 50))
+        vis.add_visual_obstruction(8, 8.8, 4.6, 4.8)
+        vis.compute_all()
+
+        with pytest.warns(DeprecationWarning):
+            fig, ax = vis.create_aset_map_plot(plot_obstructions=True)
+        ax.set_xlim(0, 20)
+        ax.set_ylim(0, 10)
+        fig.savefig(tmp_path / "aset_map.pdf", dpi=300)
+        plt.close(fig)
+        with pytest.warns(DeprecationWarning):
+            fig, ax = vis.create_time_agg_wp_agg_vismap_plot()
+        fig.savefig(tmp_path / "time_agg_wp_agg_vismap.pdf", dpi=300)
+        plt.close(fig)
+
+        time, x, y, c, waypoint_id = 450, 2, 4, 3, 2
+        with pytest.warns(DeprecationWarning):
+            wp_is_visible = vis.wp_is_visible(time, x, y, waypoint_id)
+            distance = vis.get_distance_to_wp(x, y, waypoint_id)
+            visibility = vis.get_visibility_to_wp(time, x, y, waypoint_id)
+        local_visibility = vis.get_local_visibility(time, x, y, c)
+
+        # The 0.2 README states that waypoint 2 is not visible from (2, 4) at 450 s
+        assert wp_is_visible is False
+        assert wp_is_visible == vis.sign_is_visible(time, x, y, waypoint_id)
+        assert distance == pytest.approx(7.8)
+        assert distance == vis.get_distance_to_sign(x, y, waypoint_id)
+        assert visibility == vis.get_visibility_to_sign(time, x, y, waypoint_id)
+        assert 0 <= local_visibility <= vis.max_vis
+        assert (tmp_path / "aset_map.pdf").exists()
+        assert (tmp_path / "time_agg_wp_agg_vismap.pdf").exists()
