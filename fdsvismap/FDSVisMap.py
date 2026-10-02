@@ -31,7 +31,7 @@ from matplotlib.text import Text
 from numpy.typing import ArrayLike, NDArray
 from skimage.draw import line, line_aa
 
-from fdsvismap._deprecation import warn_deprecated
+from fdsvismap._deprecation import deprecated_attribute, warn_deprecated
 from fdsvismap.helper_functions import (
     count_cells_to_obstruction,
     get_id_of_closest_value,
@@ -2683,3 +2683,30 @@ class VisMap:
             edgecolor=self.style.start_point_edge,
             zorder=3,
         )
+
+    # Renamed attributes, documented as :ivar: in 0.2. Each one warns and
+    # forwards to the attribute of the same meaning.
+    all_wp_dict = deprecated_attribute("all_wp_dict", "all_sign_dict")
+    all_wp_distance_array_dict = deprecated_attribute(
+        "all_wp_distance_array_dict", "all_sign_distance_array_dict"
+    )
+    all_wp_non_concealed_cells_array_dict = deprecated_attribute(
+        "all_wp_non_concealed_cells_array_dict",
+        "all_sign_non_concealed_cells_array_dict",
+    )
+    all_wp_angle_array_dict = deprecated_attribute(
+        "all_wp_angle_array_dict", "all_sign_angle_array_dict"
+    )
+    all_time_all_wp_vismap_array_list = deprecated_attribute(
+        "all_time_all_wp_vismap_array_list", "all_time_all_sign_vismap_list"
+    )
+    all_wp_non_concealed_cells_xy_idx_dict = deprecated_attribute(
+        "all_wp_non_concealed_cells_xy_idx_dict",
+        "all_sign_non_concealed_cells_xy_idx_dict",
+    )
+    all_wp_ray_casting_cache_dict = deprecated_attribute(
+        "all_wp_ray_casting_cache_dict", "all_sign_ray_casting_cache_dict"
+    )
+    all_time_wp_agg_vismap_list = deprecated_attribute(
+        "all_time_wp_agg_vismap_list", "all_time_sign_agg_vismap_list"
+    )

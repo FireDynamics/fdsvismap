@@ -227,3 +227,59 @@ class TestStartPointAndPlots:
         assert not [line for line in ax.lines if line.get_linestyle() == "--"]
         assert ax.yaxis_inverted()
         plt.close(fig)
+
+
+ATTRIBUTE_ALIASES = [
+    ("all_wp_dict", "all_sign_dict"),
+    ("all_wp_distance_array_dict", "all_sign_distance_array_dict"),
+    (
+        "all_wp_non_concealed_cells_array_dict",
+        "all_sign_non_concealed_cells_array_dict",
+    ),
+    ("all_wp_angle_array_dict", "all_sign_angle_array_dict"),
+    ("all_time_all_wp_vismap_array_list", "all_time_all_sign_vismap_list"),
+    (
+        "all_wp_non_concealed_cells_xy_idx_dict",
+        "all_sign_non_concealed_cells_xy_idx_dict",
+    ),
+    ("all_wp_ray_casting_cache_dict", "all_sign_ray_casting_cache_dict"),
+    ("all_time_wp_agg_vismap_list", "all_time_sign_agg_vismap_list"),
+]
+
+
+class TestAttributeAliases:
+    """The renamed attributes are reachable under their 0.2 names, reading and writing."""
+
+    @pytest.mark.parametrize("old, new", ATTRIBUTE_ALIASES)
+    def test_reading_the_old_name_returns_the_new_attribute(
+        self, legacy_scene, old, new
+    ):
+        with pytest.warns(
+            DeprecationWarning, match=f"The attribute {old} was replaced by {new}"
+        ) as record:
+            value = getattr(legacy_scene, old)
+        assert len(record) == 1
+        assert record[0].filename == __file__
+        assert value is getattr(legacy_scene, new)
+        assert len(value) == 3 or len(value) == 2  # 3 signs, or 2 time points
+
+    @pytest.mark.parametrize("old, new", ATTRIBUTE_ALIASES)
+    def test_writing_the_old_name_sets_the_new_attribute(self, old, new):
+        vis = VisMap()
+        marker = [] if old.endswith("list") else {}
+        with pytest.warns(DeprecationWarning):
+            setattr(vis, old, marker)
+        assert getattr(vis, new) is marker
+        assert old not in vis.__dict__
+
+    def test_the_cache_of_a_sign_has_the_0_3_layout(self, legacy_scene):
+        """The dict is aliased, the per-sign layout of 0.3 (flat ray indices) is kept."""
+        with pytest.warns(DeprecationWarning):
+            cache = legacy_scene.all_wp_ray_casting_cache_dict[1]
+        assert set(cache) == {
+            "ray_cells_flat_idx",
+            "ray_start_idx",
+            "ray_cell_counts",
+            "non_concealed_x_idx",
+            "non_concealed_y_idx",
+        }
