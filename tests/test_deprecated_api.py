@@ -156,3 +156,74 @@ class TestSignAliases:
             plt.close(fig)
             fig, _ = vis.plot_aset_map(route_id="route")
             plt.close(fig)
+
+
+class TestStartPointAndPlots:
+    """set_start_point() is stored for the deprecated plot, the plot aliases forward to the new plots."""
+
+    def test_set_start_point_is_stored_and_read_back(self):
+        vis = VisMap()
+        with pytest.warns(DeprecationWarning, match="The attribute start_point"):
+            assert vis.start_point is None
+        with pytest.warns(
+            DeprecationWarning,
+            match=r"set_start_point\(\) was replaced by the first waypoint of add_route\(\)",
+        ) as record:
+            vis.set_start_point(1, 9)
+        assert record[0].filename == __file__
+        with pytest.warns(DeprecationWarning):
+            assert vis.start_point == (1, 9)
+        with pytest.warns(DeprecationWarning):
+            vis.start_point = (2, 8)
+        assert vis._legacy_start_point == (2, 8)
+
+    def test_aset_plot_forwards_to_plot_aset_map(self, legacy_scene):
+        with pytest.warns(
+            DeprecationWarning,
+            match=r"create_aset_map_plot\(\) was replaced by plot_aset_map\(\)",
+        ) as record:
+            fig, ax = legacy_scene.create_aset_map_plot(plot_obstructions=True)
+        # Count only our warnings, matplotlib may add unrelated ones while drawing
+        assert sum(issubclass(w.category, DeprecationWarning) for w in record) == 1
+        assert isinstance(fig, Figure) and isinstance(ax, Axes)
+        fig_new, ax_new = legacy_scene.plot_aset_map(plot_obstructions=True)
+        np.testing.assert_array_equal(
+            ax.images[0].get_array(), ax_new.images[0].get_array()
+        )
+        plt.close(fig)
+        plt.close(fig_new)
+
+    def test_time_agg_plot_draws_the_trajectory_from_the_start_point(
+        self, legacy_scene
+    ):
+        with pytest.warns(DeprecationWarning):
+            legacy_scene.set_start_point(1, 9)
+        with pytest.warns(
+            DeprecationWarning,
+            match=r"create_time_agg_wp_agg_vismap_plot\(\) was replaced by plot_time_agg_vismap\(\)",
+        ) as record:
+            fig, ax = legacy_scene.create_time_agg_wp_agg_vismap_plot()
+        assert sum(issubclass(w.category, DeprecationWarning) for w in record) == 1
+        dashed = [line for line in ax.lines if line.get_linestyle() == "--"]
+        assert len(dashed) == 1
+        np.testing.assert_array_equal(
+            dashed[0].get_xydata(), [(1, 9), (8.4, 4.8), (9.8, 4), (17, 10)]
+        )
+        # The map itself is the one of the new plot
+        fig_new, ax_new = legacy_scene.plot_time_agg_vismap()
+        np.testing.assert_array_equal(
+            ax.images[0].get_array(), ax_new.images[0].get_array()
+        )
+        plt.close(fig)
+        plt.close(fig_new)
+
+    def test_time_agg_plot_without_a_start_point_draws_no_trajectory(
+        self, legacy_scene
+    ):
+        with pytest.warns(DeprecationWarning):
+            fig, ax = legacy_scene.create_time_agg_wp_agg_vismap_plot(
+                plot_obstructions=True, flip_y_axis=False
+            )
+        assert not [line for line in ax.lines if line.get_linestyle() == "--"]
+        assert ax.yaxis_inverted()
+        plt.close(fig)
