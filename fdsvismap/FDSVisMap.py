@@ -31,6 +31,7 @@ from matplotlib.text import Text
 from numpy.typing import ArrayLike, NDArray
 from skimage.draw import line, line_aa
 
+from fdsvismap._deprecation import warn_deprecated
 from fdsvismap.helper_functions import (
     count_cells_to_obstruction,
     get_id_of_closest_value,
@@ -2397,3 +2398,155 @@ class VisMap:
         self.visual_objects.append((x1, x2, y1, y2, True))
         self._add_visual_object(x1, x2, y1, y2, self.obstructions_array, True)
         self._invalidate_results()
+
+    # ------------------------------------------------------------------
+    # Deprecated 0.2 API. The waypoints of 0.2 were replaced by signs and
+    # routes in 0.3. These aliases warn and forward to their replacements,
+    # see the migration table in the README. Remove this block together
+    # with fdsvismap/Waypoint.py and fdsvismap/_deprecation.py in 1.0.
+    # ------------------------------------------------------------------
+
+    def set_waypoint(
+        self,
+        waypoint_id: SignId,
+        x: float,
+        y: float,
+        c: float,
+        alpha: Union[float, None, Literal["omni"]],
+    ) -> None:
+        """
+        Add a waypoint, the former name of a sign.
+
+        .. deprecated:: 0.3.0
+            Use :meth:`add_sign` with the same arguments. The route through the waypoints is given to
+            :meth:`add_route` separately.
+
+        :param waypoint_id: ID of the waypoint, see ``sign_id`` of :meth:`add_sign`.
+        :type waypoint_id: int or str
+        :param x: x-coordinate of the waypoint referring to global FDS coordinates.
+        :type x: float
+        :param y: y-coordinate of the waypoint referring to global FDS coordinates.
+        :type y: float
+        :param c: Contrast factor of the exit sign according to Jin.
+        :type c: float
+        :param alpha: Orientation angle of the exit sign according to global FDS coordinates, None for a sign
+                      that is visible from all directions.
+        :type alpha: float or None
+        """
+        warn_deprecated("set_waypoint()", "add_sign()")
+        self.add_sign(waypoint_id, x, y, c, alpha)
+
+    def get_vismap(self, waypoint_id: SignId, time: float) -> BoolArray:
+        """
+        Generate the boolean vismap of a single waypoint at a given time.
+
+        .. deprecated:: 0.3.0
+            Use :meth:`get_sign_vismap`.
+
+        :param waypoint_id: ID of the waypoint.
+        :type waypoint_id: int or str
+        :param time: The simulation time at which to evaluate visibility.
+        :type time: float
+        :return: Boolean vismap indicating whether the waypoint can be seen (True) from a cell or not (False).
+        :rtype: np.ndarray
+        """
+        warn_deprecated("get_vismap()", "get_sign_vismap()")
+        return self.get_sign_vismap(waypoint_id, time)
+
+    def get_wp_agg_vismap(self, time: float) -> BoolArray:
+        """
+        Get the boolean vismap at a point in time, aggregated over all waypoints.
+
+        .. deprecated:: 0.3.0
+            Use :meth:`get_agg_vismap`, which aggregates over all signs without a ``route_id`` and over the
+            signs of a route with one.
+
+        :param time: Time point for which to get the visibility map.
+        :type time: float
+        :return: Aggregated boolean visibility map of the shape (ny, nx).
+        :rtype: np.ndarray
+        """
+        warn_deprecated("get_wp_agg_vismap()", "get_agg_vismap()")
+        return self.get_agg_vismap(time)
+
+    def get_time_agg_wp_agg_vismap(self, t_max: Optional[float] = None) -> BoolArray:
+        """
+        Get the boolean vismap aggregated over time and over all waypoints.
+
+        .. deprecated:: 0.3.0
+            Use :meth:`get_time_agg_vismap`.
+
+        :param t_max: The maximum time to consider. If not specified, all computed time points are used.
+        :type t_max: float, optional
+        :return: Time-aggregated boolean visibility map of the shape (ny, nx).
+        :rtype: np.ndarray
+        """
+        warn_deprecated("get_time_agg_wp_agg_vismap()", "get_time_agg_vismap()")
+        return self.get_time_agg_vismap(t_max)
+
+    def get_visibility_to_wp(
+        self, time: float, x: float, y: float, waypoint_id: SignId
+    ) -> float:
+        """
+        Calculate the visibility of a waypoint at the cell closest to the given x, y coordinates.
+
+        .. deprecated:: 0.3.0
+            Use :meth:`get_visibility_to_sign`. Unlike 0.2, the viewing angle of the sign is taken into
+            account, as it is in the vismaps.
+
+        :param time: The simulation time at which to calculate the visibility.
+        :type time: float
+        :param x: The x-coordinate of the location.
+        :type x: float
+        :param y: The y-coordinate of the location.
+        :type y: float
+        :param waypoint_id: ID of the waypoint.
+        :type waypoint_id: int or str
+        :return: The visibility at the given location and time relative to the waypoint.
+        :rtype: float
+        """
+        warn_deprecated("get_visibility_to_wp()", "get_visibility_to_sign()")
+        return self.get_visibility_to_sign(time, x, y, waypoint_id)
+
+    def wp_is_visible(
+        self, time: float, x: float, y: float, waypoint_id: SignId
+    ) -> bool:
+        """
+        Determine if a waypoint is visible from the cell closest to the given x, y coordinates.
+
+        .. deprecated:: 0.3.0
+            Use :meth:`sign_is_visible`. Unlike 0.2, the waypoint is looked up by its ID, not by its position
+            in the order of insertion.
+
+        :param time: The simulation time for which visibility is checked.
+        :type time: float
+        :param x: The x-coordinate of the location.
+        :type x: float
+        :param y: The y-coordinate of the location.
+        :type y: float
+        :param waypoint_id: ID of the waypoint.
+        :type waypoint_id: int or str
+        :return: Whether the waypoint is visible from the given location at the given time.
+        :rtype: bool
+        """
+        warn_deprecated("wp_is_visible()", "sign_is_visible()")
+        return self.sign_is_visible(time, x, y, waypoint_id)
+
+    def get_distance_to_wp(self, x: float, y: float, waypoint_id: SignId) -> float:
+        """
+        Calculate the distance from the given x, y coordinates to a waypoint.
+
+        .. deprecated:: 0.3.0
+            Use :meth:`get_distance_to_sign`.
+
+        :param x: The x-coordinate of the location.
+        :type x: float
+        :param y: The y-coordinate of the location.
+        :type y: float
+        :param waypoint_id: ID of the waypoint.
+        :type waypoint_id: int or str
+        :return: The distance to the waypoint from the given location.
+        :rtype: float
+        """
+        warn_deprecated("get_distance_to_wp()", "get_distance_to_sign()")
+        return self.get_distance_to_sign(x, y, waypoint_id)
