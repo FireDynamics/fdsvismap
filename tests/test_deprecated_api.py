@@ -51,3 +51,26 @@ class TestDeprecationHelpers:
             holder.old = 2
         assert holder.new == 2
         assert "old" not in holder.__dict__
+
+
+class TestWaypoint:
+    """fdsvismap.Waypoint.Waypoint is a Sign that warns when it is created."""
+
+    def test_waypoint_is_a_sign_with_the_same_fields(self):
+        from fdsvismap.Waypoint import Waypoint
+
+        with pytest.warns(
+            DeprecationWarning,
+            match=r"fdsvismap\.Waypoint\.Waypoint was replaced by fdsvismap\.Sign",
+        ) as record:
+            waypoint = Waypoint(8.4, 4.8, 3, 0)
+        assert isinstance(waypoint, Sign)
+        assert (waypoint.x, waypoint.y, waypoint.c, waypoint.alpha) == (8.4, 4.8, 3, 0)
+        assert record[0].filename == __file__
+
+    def test_importing_the_module_and_creating_a_sign_do_not_warn(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            import fdsvismap.Waypoint  # noqa: F401
+
+            Sign(8.4, 4.8, 3, 0)
