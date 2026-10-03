@@ -53,6 +53,10 @@ FigureAxes = Tuple[Figure, Axes]
 SignId = Union[int, str]
 RouteId = Union[int, str]
 
+# Relative tolerance at the last frame of an FDS slice. It absorbs float noise in requested time points, e.g. from
+# np.arange, so that the end time of the simulation itself is accepted, but not a run that stopped earlier.
+_END_TIME_RTOL = 1e-6
+
 
 class _TextHandler(HandlerBase):
     """
@@ -264,8 +268,12 @@ class VisMap:
 
         :param time_points: Time points in the simulation in seconds, in any order.
         :type time_points: list
+        :raises ValueError: If FDS data has been read and a time point is after the last frame of the slice. The
+                            time points set before are kept.
         """
-        self.vismap_time_points = np.unique(np.asarray(time_points, dtype=float))
+        unique_time_points = np.unique(np.asarray(time_points, dtype=float))
+        self._check_times_in_simulation(unique_time_points)
+        self.vismap_time_points = unique_time_points
         self._release_slice_frames()
         self._invalidate_results()
 
@@ -599,6 +607,37 @@ class VisMap:
             int(self.slc.get_nearest_timestep(time)) for time in self.vismap_time_points
         }
 
+    def _check_times_in_simulation(self, times: ArrayLike) -> None:
+        """
+        Raise a ValueError if a time is after the last frame of the FDS slice.
+
+        The frame closest to such a time is the last one, so its smoke state would be returned for a time that
+        was not simulated. Times up to ``_END_TIME_RTOL`` (relative) after the last frame are accepted as float
+        noise. A uniform field (:meth:`set_uniform_extco`) is the same at every time and exempt, as is a scene
+        without data.
+
+        :param times: Times in seconds.
+        :type times: array_like
+        :raises ValueError: If a time is after the last frame of the FDS slice.
+        """
+        if self._uniform_extco is not None or self.slc is None:
+            return
+        t_end = float(self.fds_time_points[-1])
+        times_array = np.unique(np.asarray(times, dtype=float))
+        after_end = times_array[
+            times_array > t_end + _END_TIME_RTOL * max(1.0, abs(t_end))
+        ]
+        if not after_end.size:
+            return
+        if after_end.size == 1:
+            what = f"time={float(after_end[0])} s is"
+        else:
+            what = f"Time points {after_end.tolist()} s are"
+        raise ValueError(
+            f"{what} after the last frame of the FDS slice ({self.quantity}) at {t_end} s. "
+            f"Only times up to the end of the simulation can be evaluated; remove the later ones."
+        )
+
     def _release_slice_frames(self) -> None:
         """Remove the slice data of all FDS time steps that are not required for the time points from memory."""
         required_time_indices = self._get_required_time_indices()
@@ -649,6 +688,7 @@ class VisMap:
 
         :param time: Time point to be evaluated in seconds.
         :type time: float
+        :raises ValueError: If ``time`` is after the last frame of the FDS slice.
         :return: Array of extinction coefficients at the specified time.
         :rtype: np.ndarray
         """
@@ -666,6 +706,7 @@ class VisMap:
                 "set_grid() + set_uniform_extco() for a scene without a fire."
             )
 
+        self._check_times_in_simulation([time])
         time_index = int(self.slc.get_nearest_timestep(time))
         extco_data = self._get_slice_frame(time_index).astype(np.float64)
         if self.quantity in [
@@ -992,6 +1033,7 @@ class VisMap:
         :type sign_id: int or str
         :param time: The simulation time at which to evaluate visibility.
         :type time: float
+        :raises ValueError: If there is no sign with this ID or ``time`` is after the last frame of the FDS slice.
         :return: Boolean vismap indicating whether the sign can be seen (True) from a specific cell or not (False).
         :rtype: np.ndarray
         """
@@ -1017,7 +1059,9 @@ class VisMap:
         resolves to the nearest computed point and rejecting late times would
         force every caller of the synthetic route to clamp times themselves.
         For slice-backed scenes the check stands -- there, a time past the
-        simulation would silently reuse the last frame and lie.
+        simulation would silently reuse the last frame and lie. Since
+        :meth:`compute_all` rejects time points after the last frame of the
+        slice, this check also rejects every time after the simulation.
         """
         if self._uniform_extco is not None:
             return
@@ -2167,7 +2211,8 @@ class VisMap:
         :param progress: Determines if progress bars are shown while the signs are prepared and the vismaps are
                          computed. Default is False.
         :type progress: bool
-        :raises ValueError: If no time points are set, or none of them is up to ``t_max``.
+        :raises ValueError: If no time points are set, none of them is up to ``t_max``, or one of the time points
+                            up to ``t_max`` is after the last frame of the FDS slice.
         """
         time_points = (
             self.vismap_time_points[self.vismap_time_points <= t_max]
@@ -2183,6 +2228,7 @@ class VisMap:
                 f"No time point up to t_max={t_max}. The time points are "
                 f"{list(self.vismap_time_points)}."
             )
+        self._check_times_in_simulation(time_points)
         self._t_max_computed = float(np.max(time_points))
         self.all_time_all_sign_vismap_list = []
         self.all_time_sign_agg_vismap_list = []
@@ -2214,6 +2260,7 @@ class VisMap:
         :type y: float
         :param c: Contrast factor for exit sign according to Jin
         :type c: float
+        :raises ValueError: If ``time`` is after the last frame of the FDS slice.
         :return: The computed local visibility value at the given location and time.
         :rtype: float
         """
@@ -2243,7 +2290,7 @@ class VisMap:
         :type y: float
         :param sign_id: The ID of the sign to check visibility for.
         :type sign_id: int or str
-        :raises ValueError: If there is no sign with this ID.
+        :raises ValueError: If there is no sign with this ID or ``time`` is after the last frame of the FDS slice.
         :return: The computed visibility value at the given location and time relative to a specific sign.
         :rtype: float
         """
