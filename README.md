@@ -257,7 +257,7 @@ print(
 )
 if not not_lost.all():
     print(
-        f"The first point of the route loses its sign after {np.nanmin(route_aset):.0f} s, "
-        f"the last one after {np.nanmax(route_aset):.0f} s."
+        f"The earliest loss of a sign at a point of the route is at {np.nanmin(route_aset):.0f} s, "
+        f"the latest at {np.nanmax(route_aset):.0f} s."
     )
 ```
