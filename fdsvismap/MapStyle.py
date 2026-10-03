@@ -35,6 +35,10 @@ class MapStyle:
     :param never_visible: Color of cells in the ASET map from which no sign is visible at any time point. The
                           default is separated from all colors of viridis, also with color vision deficiency.
     :type never_visible: str
+    :param visible_until_horizon: Color of cells in the ASET map from which a sign is visible at every time point
+                                  up to the horizon, i.e. NaN in the ASET map. A light neutral color, separated
+                                  from ``never_visible`` and from the colors of viridis.
+    :type visible_until_horizon: str
     :param obstruction: Color of obstructions.
     :type obstruction: str
     :param obstruction_alpha: Opacity of obstructions.
@@ -52,6 +56,7 @@ class MapStyle:
     route_uncovered: str = "#8f8a83"
     aset_cmap: str = "viridis"
     never_visible: str = "#c6c9de"
+    visible_until_horizon: str = "#efefef"
     obstruction: str = "#5a5a5a"
     obstruction_alpha: float = 0.5
     map_alpha: float = 0.7

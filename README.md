@@ -133,6 +133,7 @@ import time
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import numpy as np
 
 from fdsvismap import VisMap
 
@@ -165,7 +166,7 @@ vis.add_route(
     signs=[1, 2, 3],
 )
 
-# Set times when the simulation should be evaluated.
+# Set times when the simulation should be evaluated, up to the end of the FDS simulation (500 s here).
 times = range(0, 500, 50)
 vis.set_time_points(times)
 
@@ -246,10 +247,17 @@ print(
     f"The visibility at time {simulation_time} s and location X/Y = ({x},{y}) relative to sign {sign_id} is {visibility:.2f} m."
 )
 
-# Evaluate the route as a whole: the first time at which each of its sections is without a visible sign.
+# Evaluate the route as a whole: the first time at which each of its points is without a visible sign. Points
+# from which a sign is visible at every time point are NaN, there is no loss up to the last time point.
 route_aset = vis.get_route_aset("exit route")
+not_lost = np.isnan(route_aset)
 print(
-    f"The first section of the route loses its sign after {route_aset.min():.0f} s, "
-    f"the last one after {route_aset.max():.0f} s."
+    f"{not_lost.sum()} of {route_aset.size} points of the route keep a visible sign up to "
+    f"{vis.vismap_time_points[-1]:.0f} s."
 )
+if not not_lost.all():
+    print(
+        f"The first point of the route loses its sign after {np.nanmin(route_aset):.0f} s, "
+        f"the last one after {np.nanmax(route_aset):.0f} s."
+    )
 ```
