@@ -24,6 +24,7 @@ from matplotlib.artist import Artist
 from matplotlib.axes import Axes
 from matplotlib.collections import LineCollection
 from matplotlib.figure import Figure
+from matplotlib.image import AxesImage
 from matplotlib.legend_handler import HandlerBase
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
@@ -52,6 +53,10 @@ ExtCoArray = FloatArray  # extinction coefficient is float
 FigureAxes = Tuple[Figure, Axes]
 SignId = Union[int, str]
 RouteId = Union[int, str]
+
+# Relative tolerance at the last frame of an FDS slice. It absorbs float noise in requested time points, e.g. from
+# np.arange, so that the end time of the simulation itself is accepted, but not a run that stopped earlier.
+_END_TIME_RTOL = 1e-6
 
 
 class _TextHandler(HandlerBase):
@@ -264,8 +269,12 @@ class VisMap:
 
         :param time_points: Time points in the simulation in seconds, in any order.
         :type time_points: list
+        :raises ValueError: If FDS data has been read and a time point is after the last frame of the slice. The
+                            time points set before are kept.
         """
-        self.vismap_time_points = np.unique(np.asarray(time_points, dtype=float))
+        unique_time_points = np.unique(np.asarray(time_points, dtype=float))
+        self._check_times_in_simulation(unique_time_points)
+        self.vismap_time_points = unique_time_points
         self._release_slice_frames()
         self._invalidate_results()
 
@@ -599,6 +608,37 @@ class VisMap:
             int(self.slc.get_nearest_timestep(time)) for time in self.vismap_time_points
         }
 
+    def _check_times_in_simulation(self, times: ArrayLike) -> None:
+        """
+        Raise a ValueError if a time is after the last frame of the FDS slice.
+
+        The frame closest to such a time is the last one, so its smoke state would be returned for a time that
+        was not simulated. Times up to ``_END_TIME_RTOL`` (relative) after the last frame are accepted as float
+        noise. A uniform field (:meth:`set_uniform_extco`) is the same at every time and exempt, as is a scene
+        without data.
+
+        :param times: Times in seconds.
+        :type times: array_like
+        :raises ValueError: If a time is after the last frame of the FDS slice.
+        """
+        if self._uniform_extco is not None or self.slc is None:
+            return
+        t_end = float(self.fds_time_points[-1])
+        times_array = np.unique(np.asarray(times, dtype=float))
+        after_end = times_array[
+            times_array > t_end + _END_TIME_RTOL * max(1.0, abs(t_end))
+        ]
+        if not after_end.size:
+            return
+        if after_end.size == 1:
+            what = f"time={float(after_end[0])} s is"
+        else:
+            what = f"Time points {after_end.tolist()} s are"
+        raise ValueError(
+            f"{what} after the last frame of the FDS slice ({self.quantity}) at {t_end} s. "
+            f"Only times up to the end of the simulation can be evaluated; remove the later ones."
+        )
+
     def _release_slice_frames(self) -> None:
         """Remove the slice data of all FDS time steps that are not required for the time points from memory."""
         required_time_indices = self._get_required_time_indices()
@@ -649,6 +689,7 @@ class VisMap:
 
         :param time: Time point to be evaluated in seconds.
         :type time: float
+        :raises ValueError: If ``time`` is after the last frame of the FDS slice.
         :return: Array of extinction coefficients at the specified time.
         :rtype: np.ndarray
         """
@@ -666,6 +707,7 @@ class VisMap:
                 "set_grid() + set_uniform_extco() for a scene without a fire."
             )
 
+        self._check_times_in_simulation([time])
         time_index = int(self.slc.get_nearest_timestep(time))
         extco_data = self._get_slice_frame(time_index).astype(np.float64)
         if self.quantity in [
@@ -992,6 +1034,7 @@ class VisMap:
         :type sign_id: int or str
         :param time: The simulation time at which to evaluate visibility.
         :type time: float
+        :raises ValueError: If there is no sign with this ID or ``time`` is after the last frame of the FDS slice.
         :return: Boolean vismap indicating whether the sign can be seen (True) from a specific cell or not (False).
         :rtype: np.ndarray
         """
@@ -1017,7 +1060,9 @@ class VisMap:
         resolves to the nearest computed point and rejecting late times would
         force every caller of the synthetic route to clamp times themselves.
         For slice-backed scenes the check stands -- there, a time past the
-        simulation would silently reuse the last frame and lie.
+        simulation would silently reuse the last frame and lie. Since
+        :meth:`compute_all` rejects time points after the last frame of the
+        slice, this check also rejects every time after the simulation.
         """
         if self._uniform_extco is not None:
             return
@@ -1104,15 +1149,23 @@ class VisMap:
         """
         Generate a map indicating the earliest time at which each point becomes non-visible.
 
-        The times are kept as floats, as :meth:`get_route_aset` does, so that time points with decimals are
-        neither truncated nor confused with the maximum time.
+        The map is evaluated at the computed time points up to the horizon, the last computed time point up to
+        ``max_time``. Each cell holds the first of these time points at which no sign is visible from it. A loss
+        at the horizon means that visibility ended after the previous time point. Cells from which a sign is
+        visible at every time point up to the horizon are NaN: no loss was observed up to the horizon, which says
+        nothing about later times. Cells from which no sign is visible at any time point hold the first time point.
+
+        The values are the requested time points, kept as floats, as :meth:`get_route_aset` does, so that time
+        points with decimals are not truncated. The smoke behind a value is the FDS frame closest to that time
+        point, which can be up to half a frame interval earlier or later.
 
         :param max_time: The maximum time to consider. If None, the maximum time computed by :meth:`compute_all` is used.
         :type max_time: float, optional
         :param route_id: ID of the route whose signs are considered. If None, all signs are considered.
         :type route_id: int or str, optional
-        :return: A 2D array where each cell represents the earliest time of non-visibility
-        for the corresponding point. Cells for points that never become non-visible are set to `max_time`.
+        :raises ValueError: If ``max_time`` exceeds the maximum computed time or there is no route with this ID.
+        :return: A 2D array of the shape (ny, nx) with the first time point without a visible sign per cell, NaN
+                 where a sign is visible up to the horizon.
         :rtype: np.ndarray
         """
         max_time = self._get_max_time(max_time)
@@ -1120,12 +1173,12 @@ class VisMap:
         if self.fds_grid_shape is None:
             raise RuntimeError("FDS data not loaded. Call read_fds_data() first.")
         aset_map = np.full(
-            (self.fds_grid_shape[1], self.fds_grid_shape[0]), max_time, dtype=float
+            (self.fds_grid_shape[1], self.fds_grid_shape[0]), np.nan, dtype=float
         )
         for time in self.vismap_time_points:
             if time > max_time:
                 break
-            mask = ~self.get_agg_vismap(time, route_id) & (aset_map == max_time)
+            mask = ~self.get_agg_vismap(time, route_id) & np.isnan(aset_map)
             aset_map[mask] = time
         return aset_map
 
@@ -1231,21 +1284,26 @@ class VisMap:
         """
         Get for each point of a route the first time at which no sign of the route is visible from it any more.
 
+        As in :meth:`get_aset_map`, the route is evaluated at the computed time points up to the horizon, the last
+        computed time point up to ``max_time``. Points from which a sign of the route is visible at every one of
+        them are NaN: no loss was observed up to the horizon, which says nothing about later times.
+
         :param route_id: ID of the route.
         :type route_id: int or str
         :param max_time: The maximum time to consider. If None, the maximum time computed by :meth:`compute_all`
-                         is used. Points from which a sign is visible up to this time get ``max_time``.
+                         is used.
         :type max_time: float, optional
         :raises ValueError: If there is no route with this ID or ``max_time`` exceeds the maximum computed time.
-        :return: Array with one time per point of :meth:`get_route_points`.
+        :return: Array with one time point per point of :meth:`get_route_points`, NaN where a sign is visible up
+                 to the horizon.
         :rtype: np.ndarray
         """
         max_time = self._get_max_time(max_time)
-        aset = np.full(len(self.get_route_points(route_id)), max_time, dtype=float)
+        aset = np.full(len(self.get_route_points(route_id)), np.nan, dtype=float)
         for time in self.vismap_time_points:
             if time > max_time:
                 break
-            mask = ~self.get_route_coverage(route_id, time) & (aset == max_time)
+            mask = ~self.get_route_coverage(route_id, time) & np.isnan(aset)
             aset[mask] = time
         return aset
 
@@ -1357,18 +1415,7 @@ class VisMap:
             vmax=vmax,
         )
         if plot_obstructions:
-            # Only the obstructed cells are drawn, on top of the map
-            ax.imshow(
-                np.ma.masked_array(
-                    self.obstructions_array, mask=~self.obstructions_array
-                ),
-                extent=extent,
-                cmap=mcolors.ListedColormap([self.style.obstruction]),
-                alpha=self.style.obstruction_alpha,
-                origin=origin,
-                vmin=0,
-                vmax=1,
-            )
+            self._plot_obstructions(ax, im)
         # Fixed limits, otherwise later artists like markers rescale the axes to a larger background image
         ax.set_xlim(extent[0], extent[1])
         ax.set_ylim(extent[2], extent[3])
@@ -1382,6 +1429,26 @@ class VisMap:
         ax.set_xlabel("$X$ / m")
         ax.set_ylabel("$Y$ / m")
         return fig, ax
+
+    def _plot_obstructions(self, ax: Axes, map_image: AxesImage) -> None:
+        """
+        Draw the obstructed cells on top of a map, at the extent and in the orientation of the map.
+
+        :param ax: Axes of the map.
+        :type ax: matplotlib.axes.Axes
+        :param map_image: Image of the map.
+        :type map_image: matplotlib.image.AxesImage
+        """
+        # Only the obstructed cells are drawn, on top of the map
+        ax.imshow(
+            np.ma.masked_array(self.obstructions_array, mask=~self.obstructions_array),
+            extent=map_image.get_extent(),
+            cmap=mcolors.ListedColormap([self.style.obstruction]),
+            alpha=self.style.obstruction_alpha,
+            origin=map_image.origin,
+            vmin=0,
+            vmax=1,
+        )
 
     def _plot_boolean_map(
         self,
@@ -1884,9 +1951,12 @@ class VisMap:
         """
         Create a plot visualizing the ASET map (Available Safe Egress Time) map indicating for each cell the first time any sign is not visible.
 
-        The color scale ``style.aset_cmap`` runs from 0 to the maximum time. Cells from which no sign is visible
-        at any time point up to the maximum time are drawn in ``style.never_visible``. For a route, its polyline
-        and its signs are drawn on the map.
+        The color scale ``style.aset_cmap`` runs from 0 to the maximum time and shows the time points of
+        :meth:`get_aset_map`. Cells from which no sign is visible at any time point up to the maximum time are drawn
+        in ``style.never_visible``. Cells from which a sign is visible at every time point up to the horizon, the last
+        computed time point up to the maximum time, are NaN in :meth:`get_aset_map`: no loss was observed up to the
+        horizon, which says nothing about later times. They are drawn in ``style.visible_until_horizon``,
+        described by the legend. For a route, its polyline and its signs are drawn on the map.
 
         :param max_time: The maximum time value to consider for the ASET calculations. If None, it defaults to the last time in the visibility data.
         :type max_time: float, optional
@@ -1898,7 +1968,8 @@ class VisMap:
         :type ax: matplotlib.axes.Axes, optional
         :param route_id: ID of the route whose signs are considered. If None, all signs are considered.
         :type route_id: int or str, optional
-        :param legend: Flag indicating whether a legend of the route is added. Default is True.
+        :param legend: Flag indicating whether a legend of the cells visible until the horizon and of the route is
+                       added. Default is True.
         :type legend: bool, optional
         :raises ValueError: If there is no route with this ID.
         :return: A tuple containing the matplotlib figure and axes objects that display the ASET map.
@@ -1911,28 +1982,51 @@ class VisMap:
             if time <= max_time:
                 ever_visible |= self.get_agg_vismap(time, route_id)
         never_visible = ~ever_visible
+        visible_until_horizon = np.isnan(aset_map) & ever_visible
 
-        # Masked cells are drawn in the "bad" color of the colormap
-        cmap = plt.get_cmap(self.style.aset_cmap).with_extremes(
-            bad=self.style.never_visible
-        )
+        # Both classes without a time are masked and transparent here, and drawn by an image of their own. NaN
+        # would be drawn in the "bad" color, the color of one of them.
+        cmap = plt.get_cmap(self.style.aset_cmap).with_extremes(bad="none")
         fig, ax = self.plot_map(
-            np.ma.masked_array(aset_map, mask=never_visible),
+            np.ma.masked_array(aset_map, mask=never_visible | visible_until_horizon),
             cmap=cmap,
             ax=ax,
-            plot_obstructions=plot_obstructions,
             flip_y_axis=flip_y_axis,
             vmin=0,
             vmax=max_time,
             cbar_kwargs={"label": "Time / s"},
         )
+        times_image = ax.get_images()[-1]
+        ax.imshow(
+            np.ma.masked_array(
+                visible_until_horizon, mask=~(never_visible | visible_until_horizon)
+            ),
+            cmap=mcolors.ListedColormap(
+                [self.style.never_visible, self.style.visible_until_horizon]
+            ),
+            alpha=self.style.map_alpha,
+            extent=times_image.get_extent(),
+            origin=times_image.origin,
+            vmin=0,
+            vmax=1,
+        )
+        if plot_obstructions:
+            self._plot_obstructions(ax, times_image)
+        handles: List[Artist] = [
+            Patch(
+                facecolor=self.style.visible_until_horizon,
+                alpha=self.style.map_alpha,
+                label="visible until horizon",
+            )
+        ]
+        title = None
         if route_id is not None:
             route_handles = self._plot_route(ax, route_id)
-            handles = self._plot_signs(ax, self._get_route(route_id).signs)
-            if legend:
-                self._add_legend(
-                    ax, handles + route_handles, title=f"Route: {route_id}"
-                )
+            handles += self._plot_signs(ax, self._get_route(route_id).signs)
+            handles += route_handles
+            title = f"Route: {route_id}"
+        if legend:
+            self._add_legend(ax, handles, title=title)
         return fig, ax
 
     def plot_time_agg_vismap(
@@ -2167,7 +2261,8 @@ class VisMap:
         :param progress: Determines if progress bars are shown while the signs are prepared and the vismaps are
                          computed. Default is False.
         :type progress: bool
-        :raises ValueError: If no time points are set, or none of them is up to ``t_max``.
+        :raises ValueError: If no time points are set, none of them is up to ``t_max``, or one of the time points
+                            up to ``t_max`` is after the last frame of the FDS slice.
         """
         time_points = (
             self.vismap_time_points[self.vismap_time_points <= t_max]
@@ -2183,6 +2278,7 @@ class VisMap:
                 f"No time point up to t_max={t_max}. The time points are "
                 f"{list(self.vismap_time_points)}."
             )
+        self._check_times_in_simulation(time_points)
         self._t_max_computed = float(np.max(time_points))
         self.all_time_all_sign_vismap_list = []
         self.all_time_sign_agg_vismap_list = []
@@ -2214,6 +2310,7 @@ class VisMap:
         :type y: float
         :param c: Contrast factor for exit sign according to Jin
         :type c: float
+        :raises ValueError: If ``time`` is after the last frame of the FDS slice.
         :return: The computed local visibility value at the given location and time.
         :rtype: float
         """
@@ -2243,7 +2340,7 @@ class VisMap:
         :type y: float
         :param sign_id: The ID of the sign to check visibility for.
         :type sign_id: int or str
-        :raises ValueError: If there is no sign with this ID.
+        :raises ValueError: If there is no sign with this ID or ``time`` is after the last frame of the FDS slice.
         :return: The computed visibility value at the given location and time relative to a specific sign.
         :rtype: float
         """
