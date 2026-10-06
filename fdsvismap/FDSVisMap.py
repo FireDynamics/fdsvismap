@@ -227,6 +227,10 @@ class VisMap:
         # Set by set_uniform_extco() instead of read_fds_data(), for scenes
         # that have a geometry but no fire.
         self._uniform_extco: Optional[float] = None
+        # Set by read_fds_data(outside_mesh_extco=...): extinction coefficient
+        # of the slice cells outside every mesh, and the mask of those cells
+        self._outside_mesh_extco: Optional[float] = None
+        self._outside_mesh_mask: Optional[BoolArray] = None
         # ----------------------------------------------------
 
     def _invalidate_results(self) -> None:
@@ -465,6 +469,8 @@ class VisMap:
         # A real slice no longer applies once a synthetic field is set, or
         # get_extco_array_at_time() would have to choose between two sources.
         self.slc = None
+        self._outside_mesh_extco = None
+        self._outside_mesh_mask = None
         self._uniform_extco = float(extco)
         if time_points is not None:
             points = list(time_points)
@@ -482,6 +488,7 @@ class VisMap:
         fds_slc_height: float = 2.0,
         fds_slc_id: Optional[str] = None,
         fds_slc_index: Optional[int] = None,
+        outside_mesh_extco: Optional[float] = None,
     ) -> None:
         """
         Read FDS data and store relevant coordinates, shape of the meshgrid, slices and obstructions.
@@ -504,8 +511,26 @@ class VisMap:
         :param fds_slc_index: Index of the slice in ``fdsreader.Simulation(sim_dir).slices``, as listed in the
             error message. Selects slices without an ID. Default is None.
         :type fds_slc_index: int, optional
-        :raises ValueError: If no matching slice is found. The message lists the available slices.
+        :param outside_mesh_extco: Extinction coefficient in 1/m of the slice cells outside every mesh of the slice,
+            which FDS does not cover and which are NaN otherwise. Only NaN cells are filled. ``0.0`` treats them as clear air: they enter the
+            mean extinction of a ray like any other cell, and the local visibility there is ``max_vis``. Cells within
+            a mesh are never filled, also if their value is NaN. The cells are not obstructions: with this option and
+            no walls, signs are visible through the exterior, so add walls there with
+            :meth:`add_visual_obstruction`. Default is None, which keeps the NaN.
+            Supported are slices whose meshes have uniformly spaced nodes on one common grid, with every x and y
+            column of the slice covered by at least one mesh. Otherwise fdsreader lists other slice coordinates than
+            it assembles the data on, and the cells outside every mesh cannot be located.
+        :type outside_mesh_extco: float, optional
+        :raises ValueError: If no matching slice is found. The message lists the available slices. If
+            *outside_mesh_extco* is negative or not finite, or given for a slice that is not supported.
         """
+        if outside_mesh_extco is not None and not (
+            np.isfinite(outside_mesh_extco) and outside_mesh_extco >= 0
+        ):
+            raise ValueError(
+                f"read_fds_data: outside_mesh_extco must be a finite extinction coefficient >= 0 in 1/m or None, "
+                f"got {outside_mesh_extco}"
+            )
         sim = fds.Simulation(sim_dir)
         if fds_slc_index is not None:
             if not 0 <= fds_slc_index < len(sim.slices):
@@ -567,8 +592,77 @@ class VisMap:
         # set_uniform_extco() followed by read_fds_data() uses the simulation
         # rather than silently ignoring it.
         self._uniform_extco = None
+        if outside_mesh_extco is None:
+            self._outside_mesh_extco = None
+            self._outside_mesh_mask = None
+        else:
+            self._check_assembled_coordinates()
+            self._outside_mesh_extco = float(outside_mesh_extco)
+            self._outside_mesh_mask = self._get_outside_mesh_mask()
         self.build_obstructions_array()
         self._invalidate_results()
+
+    def _get_outside_mesh_mask(self) -> BoolArray:
+        """
+        Mark the slice cells that lie outside the closed extent of every mesh the slice cuts through.
+
+        A cell on a mesh boundary, within 1e-6 of the cell size, belongs to the mesh.
+
+        :return: Mask of shape (nx, ny), True outside every mesh.
+        :rtype: np.ndarray
+        """
+        if self.slc is None:
+            raise RuntimeError("FDS data not loaded. Call read_fds_data() first.")
+        x, y = self.all_x_coords, self.all_y_coords
+        tol_x, tol_y = 1e-6 * self.cell_size[0], 1e-6 * self.cell_size[1]
+        inside = np.zeros((x.size, y.size), dtype=bool)
+        for subslice in self.slc.subslices:
+            mesh_extent = subslice.mesh.extent
+            in_x = (x >= mesh_extent.x_start - tol_x) & (x <= mesh_extent.x_end + tol_x)
+            in_y = (y >= mesh_extent.y_start - tol_y) & (y <= mesh_extent.y_end + tol_y)
+            inside |= in_x[:, None] & in_y[None, :]
+        return cast(BoolArray, ~inside)
+
+    def _check_assembled_coordinates(self) -> None:
+        """
+        Raise a ValueError unless the slice coordinates are those of the grid ``Slice.to_global()`` assembles.
+
+        ``to_global()`` of fdsreader 1.11.5 to 1.12.1 assembles a regular grid from the lowest mesh node, with the
+        smallest first spacing of all meshes; ``get_coordinates()`` lists the coordinates of the meshes. They differ if
+        a gap between meshes spans the whole slice, or if meshes are stretched or not aligned to that grid.
+
+        :raises ValueError: If the coordinates differ, naming the slice and the first differing coordinate.
+        """
+        if self.slc is None:
+            raise RuntimeError("FDS data not loaded. Call read_fds_data() first.")
+        subslices = list(self.slc.subslices)
+        for dim, listed in (("x", self.all_x_coords), ("y", self.all_y_coords)):
+            nodes = [
+                s.get_coordinates(ignore_cell_centered=True)[dim] for s in subslices
+            ]
+            start = min(n[0] for n in nodes)
+            spacing = min(
+                s.mesh.coordinates[dim][1] - s.mesh.coordinates[dim][0]
+                for s in subslices
+            )
+            count = max(int(round((max(n[-1] for n in nodes) - start) / spacing)), 1)
+            if self.slc.cell_centered:
+                assembled = start + (np.arange(count) + 0.5) * spacing
+            else:
+                assembled = start + np.arange(count + 1) * spacing
+            if assembled.size == listed.size and np.allclose(
+                assembled, listed, rtol=0, atol=1e-4 * spacing
+            ):
+                continue
+            raise ValueError(
+                f"read_fds_data: outside_mesh_extco cannot be used with slice {self.slc.id or '(no ID)'}: fdsreader "
+                f"assembles its data on {assembled.size} {dim} coordinates from {assembled[0]:g} m in steps of "
+                f"{spacing:g} m, but lists {listed.size} {dim} coordinates "
+                f"{np.array2string(listed, precision=4, threshold=12)}, so the cells outside every mesh cannot be "
+                f"located. A gap between meshes that spans the whole slice, or stretched or misaligned meshes, cause "
+                f"this. Supported are meshes with uniformly spaced nodes on one common grid, with every x and y column "
+                f"of the slice covered by at least one mesh; use a slice or mesh layout that meets this."
+            )
 
     @staticmethod
     def _get_nearest_horizontal_slice(slices: Iterable[Any], height: float) -> Any:
@@ -921,6 +1015,19 @@ class VisMap:
             extco_array: ExtCoArray = extco_data * np.log(10)
         else:
             extco_array = extco_data
+        if self._outside_mesh_mask is not None:
+            if self._outside_mesh_mask.shape != extco_array.shape:
+                # read_fds_data() checked the coordinates; reached only if to_global() assembles otherwise
+                raise ValueError(
+                    f"outside_mesh_extco: slice {self.slc.id or '(no ID)'} at t = {time} s has shape "
+                    f"{extco_array.shape}, but its coordinates give {self._outside_mesh_mask.shape}, so the cells "
+                    "outside every mesh cannot be located. Supported are meshes with uniformly spaced nodes on one "
+                    "common grid, with every x and y column of the slice covered by at least one mesh."
+                )
+            # After the conversion, as the value is an extinction coefficient.
+            # Only NaN is filled, a value FDS wrote is never replaced.
+            outside = self._outside_mesh_mask & np.isnan(extco_array)
+            extco_array[outside] = self._outside_mesh_extco
 
         return extco_array
 
