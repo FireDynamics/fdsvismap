@@ -788,7 +788,10 @@ class VisMap:
         # Update the obstruction_matrix based on defined obstructions and their height ranges
         for obstruction in self.obstructions_collection:
             for sub_obstruction in obstruction:
-                _, x_range, y_range, z_range = sub_obstruction.extent
+                # Index by axis: unpacking the extent only worked up to fdsreader 1.12.1, as its
+                # __getitem__ returned the z range for index 0
+                extent = sub_obstruction.extent
+                x_range, y_range, z_range = extent["x"], extent["y"], extent["z"]
                 if z_range[0] <= self.fds_slc_height <= z_range[1]:
                     obstruction_array = self._add_visual_object(
                         x_range[0],

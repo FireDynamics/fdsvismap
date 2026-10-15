@@ -21,8 +21,9 @@ dependencies = [
     "matplotlib~=3.10,<4.0",
     # 0.23 has no wheels for Python 3.13 and newer, only skimage.draw.line and line_aa are used
     "scikit-image>=0.23.2,<1.0",
-    # fdsreader 1.11.9 raises an AttributeError in Slice.get_coordinates() for cell-centered slices
-    "fdsreader>=1.11.5,<1.11.9",
+    # fdsreader 1.11.9 and 1.12.0 raise an AttributeError in Slice.get_coordinates() for cell-centered slices,
+    # tested up to 1.14.0
+    "fdsreader>=1.11.5,!=1.11.9,!=1.12.0,<1.15",
     "tqdm>=4.66.3,<5.0",
 ]
 
