@@ -7,6 +7,7 @@ from typing import (
     Iterable,
     List,
     Literal,
+    NamedTuple,
     Optional,
     Sequence,
     Set,
@@ -98,6 +99,19 @@ class RayCastingCache(TypedDict):
     ray_cell_counts: IntArray
     non_concealed_x_idx: IntArray
     non_concealed_y_idx: IntArray
+
+
+class _NodePlacement(NamedTuple):
+    """Where ``fdsreader.Slice.to_global()`` puts the nodes of one subslice, per axis x and y."""
+
+    # Grid nodes from the first to the last node of the mesh
+    closed: Tuple[slice, slice]
+    # Grid nodes to_global() writes, without a dropped upper face
+    written: Tuple[slice, slice]
+    # Grid nodes per mesh node, for a mesh coarser than the grid
+    repeat: Tuple[int, int]
+    origin: Tuple[float, float]
+    spacing: Tuple[float, float]
 
 
 class VisMap:
@@ -204,6 +218,9 @@ class VisMap:
         self.fds_slc_height: float = 2.0
         # Slice data per FDS time step index, loaded on first access
         self._slice_frames: Dict[int, Float32Array] = {}
+        # Warnings of _recover_dropped_nodes() already logged since the last read_fds_data(), as frames can be
+        # assembled several times
+        self._recovery_warnings: Set[str] = set()
         # Rectangles of add_visual_obstruction() and add_visual_hole() as
         # (x1, x2, y1, y2, obstructed), applied again after every rebuild
         self.visual_objects: List[Tuple[float, float, float, float, bool]] = []
@@ -473,6 +490,11 @@ class VisMap:
         slice closest to the given height.
         The slice data itself is read on first access, see :meth:`get_extco_array_at_time`.
 
+        Known limitation of node-based slices: fdsreader 1.11.5 to 1.12.1 assigns the second-to-last node row to the
+        upper x and y faces of the domain (https://github.com/FireDynamics/fdsreader/issues/123). The extinction
+        coefficient on those faces is the value one node inside, which can make the visibility along the upper walls
+        longer than FDS computed (non-conservative) or shorter. Cell-centred slices are not affected.
+
         :param sim_dir: Directory where FDS simulation data is stored
         :type sim_dir: object
         :param fds_slc_id: ID (name) of FDS slice file to be evaluated. Default is None.
@@ -540,6 +562,7 @@ class VisMap:
         self.obstructions_collection = sim.obstructions
         self.fds_slc_height = fds_slc_height
         self._slice_frames = {}
+        self._recovery_warnings = set()
         # A real slice supersedes any synthetic field, so that
         # set_uniform_extco() followed by read_fds_data() uses the simulation
         # rather than silently ignoring it.
@@ -634,10 +657,231 @@ class VisMap:
                 len(missing_time_indices),
             )
             slice_data = self.slc.to_global()
+            self._recover_dropped_nodes(slice_data)
             self.slc.clear_cache()
             for index in missing_time_indices:
                 self._slice_frames[index] = slice_data[index].astype(np.float32)
         return self._slice_frames[time_index]
+
+    def _recover_dropped_nodes(self, slice_data: FloatArray) -> None:
+        """
+        Fill the nodes of a node-based slice that ``Slice.to_global()`` omits although FDS wrote them.
+
+        Workaround for fdsreader issue #121, present in fdsreader 1.11.5 to 1.11.7 and 1.12.1:
+        ``to_global()`` writes each mesh into a regular grid with the finest mesh spacing, but leaves out the upper x and
+        y node row of every mesh whose upper face is not at the global maximum, assuming a neighbouring mesh writes it.
+        On a domain that does not fill its bounding box, such as an L-shaped corridor, no mesh does and the nodes stay
+        NaN. This method repeats the placement of ``to_global()`` to find the grid nodes that no mesh wrote, and fills
+        only those that lie within a mesh, from that mesh's own data with the same coarse-to-fine sampling as
+        ``to_global()``. A node some mesh wrote keeps its value, also NaN, and nodes outside every mesh stay NaN.
+
+        A node within two or more meshes takes the value of the mesh on the fewest of whose faces (x, y and z) it lies.
+        FDS writes a node value as the mean of the gas cells around it (``CORNER_VALUE`` in dump.f90), but a mesh does
+        not count the ghost cell diagonal to its edges (``EXTERIOR_EDGE`` in read.f90). At a mesh edge or corner the
+        value can therefore miss a gas cell of another mesh; on one face only it is complete. Fewest faces is the
+        selection rule, not a proof that the selected value is the most complete average in every case. Meshes with
+        the same number of faces are tied geometrically, which does not mean they miss the same gas cells or hold the
+        same value; the tie goes deterministically to the mesh that comes first in ``slc.subslices``, so the result
+        of a tie depends on that order.
+
+        A mesh whose nodes are not on the grid ``to_global()`` puts them on, e.g. a stretched mesh, is not used; its
+        nodes stay NaN unless another mesh that holds them is used. If the grid does not have the expected shape,
+        nothing is recovered. Each case logs one warning per :meth:`read_fds_data`, naming the slice and, for a
+        mesh, the mesh.
+
+        Not corrected here: ``to_global()`` writes the second-to-last node row at the upper x and y faces of the domain
+        (fdsreader issue #123), see :meth:`read_fds_data`.
+
+        Regression tests: ``tests/test_dropped_upper_nodes.py``. If its canary
+        ``test_fdsreader_still_drops_the_upper_face_nodes`` fails, investigate: check that the release assembles
+        every face node with the right value and leaves written and outside nodes as they are without this method.
+        Then raise the lower bound of fdsreader in ``pyproject.toml`` to the fixed release, remove or invert the canary
+        and remove this method; keep the other tests.
+
+        :param slice_data: Output of ``to_global()``, shape (n_t, nx, ny), changed in place.
+        :type slice_data: np.ndarray
+        """
+        if self.slc is None or self.slc.cell_centered:
+            # Cell-centred subslices do not overlap and lose no data
+            return
+        if not isinstance(slice_data, np.ndarray) or slice_data.ndim != 3:
+            return
+        subslices = list(self.slc.subslices)
+        placements = self._get_node_placements(subslices, slice_data.shape[1:])
+        if placements is None:
+            return
+        written = np.zeros(slice_data.shape[1:], dtype=bool)
+        for placement in placements:
+            written[placement.written] = True
+        omitted = ~written
+        if not omitted.any():
+            return
+        # Per omitted node: the fewest mesh faces it lies on, and the index of that mesh. Only a mesh with fewer faces
+        # replaces the one found before, so ties keep the mesh that comes first.
+        fewest_faces = np.full(omitted.shape, 4)
+        source = np.full(omitted.shape, -1)
+        for index, (subslice, placement) in enumerate(zip(subslices, placements)):
+            x_ids, y_ids = np.nonzero(omitted[placement.closed])
+            if x_ids.size == 0:
+                continue
+            problem = self._node_placement_problem(subslice, placement)
+            if problem is not None:
+                self._warn_once(problem)
+                continue
+            grid_x_ids = x_ids + placement.closed[0].start
+            grid_y_ids = y_ids + placement.closed[1].start
+            faces = self._count_mesh_faces(subslice, placement, grid_x_ids, grid_y_ids)
+            fewer = faces < fewest_faces[grid_x_ids, grid_y_ids]
+            fewest_faces[grid_x_ids[fewer], grid_y_ids[fewer]] = faces[fewer]
+            source[grid_x_ids[fewer], grid_y_ids[fewer]] = index
+        for index, (subslice, placement) in enumerate(zip(subslices, placements)):
+            grid_x_ids, grid_y_ids = np.nonzero(source == index)
+            x_ids = (grid_x_ids - placement.closed[0].start) // placement.repeat[0]
+            y_ids = (grid_y_ids - placement.closed[1].start) // placement.repeat[1]
+            slice_data[:, grid_x_ids, grid_y_ids] = subslice.data[:, x_ids, y_ids]
+
+    def _warn_once(self, message: str) -> None:
+        """
+        Log a warning of :meth:`_recover_dropped_nodes` unless it was logged since the last :meth:`read_fds_data`.
+
+        :param message: The warning, the same text for the same slice and mesh.
+        :type message: str
+        """
+        if message in self._recovery_warnings:
+            return
+        self._recovery_warnings.add(message)
+        logger.warning(message)
+
+    def _count_mesh_faces(
+        self,
+        subslice: Any,
+        placement: "_NodePlacement",
+        grid_x_ids: IntArray,
+        grid_y_ids: IntArray,
+    ) -> IntArray:
+        """
+        Count the faces of a mesh that grid nodes lie on, in x, y and z.
+
+        :param subslice: Subslice of the mesh.
+        :type subslice: fdsreader.slcf.SubSlice
+        :param placement: Its placement from :meth:`_get_node_placements`.
+        :type placement: _NodePlacement
+        :param grid_x_ids: x indices of the nodes in the grid of ``to_global()``.
+        :type grid_x_ids: np.ndarray
+        :param grid_y_ids: y indices of the nodes in the grid of ``to_global()``.
+        :type grid_y_ids: np.ndarray
+        :return: Number of faces per node, 0 to 3 for a mesh with at least two nodes along x and y.
+        :rtype: np.ndarray
+        """
+        faces = np.zeros(grid_x_ids.size, dtype=int)
+        for ids, closed in (
+            (grid_x_ids, placement.closed[0]),
+            (grid_y_ids, placement.closed[1]),
+        ):
+            faces += (ids == closed.start).astype(int) + (
+                ids == closed.stop - 1
+            ).astype(int)
+        z_nodes = np.asarray(subslice.mesh.coordinates["z"], dtype=float)
+        z = self.slc.extent.z_start if self.slc is not None else np.nan
+        tolerance = 1e-4 * float(np.min(np.diff(z_nodes))) if z_nodes.size > 1 else 0.0
+        on_z_face = min(abs(z - z_nodes[0]), abs(z - z_nodes[-1])) <= tolerance
+        return cast(IntArray, faces + int(on_z_face))
+
+    def _get_node_placements(
+        self, subslices: List[Any], grid_shape: Tuple[int, ...]
+    ) -> Optional[List["_NodePlacement"]]:
+        """
+        Get where ``Slice.to_global()`` puts the nodes of each subslice of a node-based horizontal slice.
+
+        Follows ``to_global()`` of fdsreader 1.11.5 to 1.12.1: the grid starts at the lowest node, its spacing is the
+        smallest first spacing of all meshes, and a mesh starts at the grid node nearest to its first node.
+
+        :param subslices: Subslices of the slice.
+        :type subslices: list[fdsreader.slcf.SubSlice]
+        :param grid_shape: Shape (nx, ny) of the grid ``to_global()`` returned.
+        :type grid_shape: tuple[int, int]
+        :return: Placement per subslice, in the same order, or None with a warning if the grid derived this way does
+            not have the shape of the returned one.
+        :rtype: list[_NodePlacement] or None
+        """
+        origin, spacing, top, last = {}, {}, {}, {}
+        for dim in ("x", "y"):
+            origin[dim] = min(s.get_coordinates()[dim][0] for s in subslices)
+            last[dim] = max(s.get_coordinates()[dim][-1] for s in subslices)
+            spacing[dim] = min(
+                s.mesh.coordinates[dim][1] - s.mesh.coordinates[dim][0]
+                for s in subslices
+            )
+            top[dim] = max(s.mesh.coordinates[dim][-1] for s in subslices)
+        expected_shape = tuple(
+            max(int(round((last[dim] - origin[dim]) / spacing[dim])), 1) + 1
+            for dim in ("x", "y")
+        )
+        if expected_shape != tuple(grid_shape):
+            self._warn_once(
+                f"Slice {self.slc.id if self.slc is not None else ''}: the nodes fdsreader drops at mesh faces "
+                f"(fdsreader#121) are not recovered and stay NaN as in fdsvismap 0.3.2: to_global() returned a grid "
+                f"of {tuple(grid_shape)} nodes, expected {expected_shape} from the meshes."
+            )
+            return None
+        placements = []
+        for subslice in subslices:
+            closed, written, repeat = [], [], []
+            for dim in ("x", "y"):
+                coords = subslice.mesh.coordinates[dim]
+                start = int(round((coords[0] - origin[dim]) / spacing[dim]))
+                end = int(round((coords[-1] - origin[dim]) / spacing[dim]))
+                at_top = bool(np.isclose(coords[-1], top[dim]))
+                closed.append(slice(start, end + 1))
+                written.append(slice(start, end + 1 if at_top else end))
+                repeat.append(
+                    max(int(round((coords[1] - coords[0]) / spacing[dim])), 1)
+                )
+            placements.append(
+                _NodePlacement(
+                    (closed[0], closed[1]),
+                    (written[0], written[1]),
+                    (repeat[0], repeat[1]),
+                    (origin["x"], origin["y"]),
+                    (spacing["x"], spacing["y"]),
+                )
+            )
+        return placements
+
+    def _node_placement_problem(
+        self, subslice: Any, placement: "_NodePlacement"
+    ) -> Optional[str]:
+        """
+        Describe why the nodes of a subslice do not lie on the grid nodes ``to_global()`` assigns to them.
+
+        :param subslice: Subslice of the slice.
+        :type subslice: fdsreader.slcf.SubSlice
+        :param placement: Its placement from :meth:`_get_node_placements`.
+        :type placement: _NodePlacement
+        :return: None if every node is within 1e-4 of the grid spacing of its grid node and the subslice data holds
+            one value per mesh node, otherwise a message naming the slice, the mesh and the axis.
+        :rtype: str or None
+        """
+        for axis, dim in enumerate(("x", "y")):
+            coords = np.asarray(subslice.mesh.coordinates[dim], dtype=float)
+            grid_ids = placement.closed[axis].start + placement.repeat[
+                axis
+            ] * np.arange(coords.size)
+            grid_coords = placement.origin[axis] + grid_ids * placement.spacing[axis]
+            on_grid = np.allclose(
+                coords, grid_coords, rtol=0, atol=1e-4 * placement.spacing[axis]
+            )
+            if on_grid and subslice.data.shape[axis + 1] == coords.size:
+                continue
+            slice_id = self.slc.id if self.slc is not None else ""
+            return (
+                f"Slice {slice_id}: the nodes fdsreader drops at the upper faces of mesh {subslice.mesh.id} "
+                f"(fdsreader#121) are not recovered from it: its {dim} nodes {coords.tolist()} are not on the grid "
+                f"{grid_coords.tolist()} that to_global() puts them on (origin {placement.origin[axis]}, spacing "
+                f"{placement.spacing[axis]}). These nodes stay NaN as in fdsvismap 0.3.2; values of this mesh may not "
+                f"be at their coordinates (fdsreader assembles on a uniform grid)."
+            )
+        return None
 
     def get_extco_array_at_time(self, time: float) -> ExtCoArray:
         """
