@@ -194,7 +194,7 @@ class TestTimePoints:
             )
 
         # The maximum time is the latest one, not the last one that was passed
-        assert shuffled.get_aset_map().max() == 450
+        assert np.nanmax(shuffled.get_aset_map()) == 450
         with pytest.raises(ValueError):
             shuffled.get_agg_vismap(500)
 
@@ -569,9 +569,9 @@ class TestAsetMap:
         """Test that the ASET map holds the first time without a sign, also with decimals."""
         times = np.asarray(fractional_map.vismap_time_points)
         not_visible = np.array([~fractional_map.get_agg_vismap(time) for time in times])
-        # The first time point without a visible sign, or the maximum time if one stays visible
+        # The first time point without a visible sign, or NaN if one stays visible
         expected = np.where(
-            not_visible.any(axis=0), times[np.argmax(not_visible, axis=0)], times[-1]
+            not_visible.any(axis=0), times[np.argmax(not_visible, axis=0)], np.nan
         )
 
         aset_map = fractional_map.get_aset_map()
@@ -579,14 +579,18 @@ class TestAsetMap:
         np.testing.assert_array_equal(aset_map, expected)
 
         # Times with decimals occur and are not truncated to full seconds
-        assert set(np.unique(aset_map)) <= set(times)
-        assert (aset_map % 1 != 0).any()
+        lost = aset_map[np.isfinite(aset_map)]
+        assert set(np.unique(lost)) <= set(times)
+        assert (lost % 1 != 0).any()
 
     def test_aset_map_of_a_part_of_the_time(self, fractional_map):
         """Test that a maximum time with decimals limits the map to the time points below it."""
         aset_map = fractional_map.get_aset_map(112.5)
-        assert set(np.unique(aset_map)) <= {0.0, 112.5}
+        assert set(np.unique(aset_map[np.isfinite(aset_map)])) <= {0.0, 112.5}
         np.testing.assert_array_equal(aset_map == 0, ~fractional_map.get_agg_vismap(0))
+        np.testing.assert_array_equal(
+            np.isnan(aset_map), fractional_map.get_time_agg_vismap(112.5)
+        )
 
 
 class TestPlotGeneration:
@@ -704,13 +708,14 @@ class TestPlotGeneration:
 
         # ASET map scaled from 0 to the maximum time, never visible cells in their own color
         fig, ax = vis_map.plot_aset_map()
-        image = ax.get_images()[-1]
+        times_image, classes_image = ax.get_images()[-2:]
         never_visible = ~np.logical_or.reduce(vis_map.all_time_sign_agg_vismap_list)
-        assert (image.norm.vmin, image.norm.vmax) == (0, 450)
+        assert (times_image.norm.vmin, times_image.norm.vmax) == (0, 450)
+        classes = classes_image.get_array()
         np.testing.assert_array_equal(
-            np.ma.getmaskarray(image.get_array()), never_visible
+            ~np.ma.getmaskarray(classes) & (classes == 0), never_visible
         )
-        assert mcolors.to_hex(image.cmap.get_bad()) == default.never_visible
+        assert mcolors.to_hex(classes_image.cmap(0)) == default.never_visible
         plt.close(fig)
 
 
@@ -816,9 +821,9 @@ class TestSignsAndRoutes:
         coverage = np.array(
             [route_map.get_route_coverage("west", time) for time in times]
         )
-        # The first time point without coverage, or the maximum time if a sign stays visible
+        # The first time point without coverage, or NaN if a sign stays visible
         expected = np.where(
-            coverage.all(axis=0), times[-1], times[np.argmin(coverage, axis=0)]
+            coverage.all(axis=0), np.nan, times[np.argmin(coverage, axis=0)]
         )
         np.testing.assert_array_equal(aset, expected)
 
@@ -862,10 +867,18 @@ class TestSignsAndRoutes:
         plt.close(fig)
 
         fig, ax = route_map.plot_aset_map(route_id="east")
-        np.testing.assert_array_equal(
-            np.asarray(ax.get_images()[-1].get_array()),
-            route_map.get_aset_map(route_id="east"),
+        times = ax.get_images()[-2].get_array()
+        aset_map = route_map.get_aset_map(route_id="east")
+        shown = ~np.ma.getmaskarray(times)
+        np.testing.assert_array_equal(np.ma.getdata(times)[shown], aset_map[shown])
+        # All times of the ASET map are shown, except at the never visible cells
+        ever_visible = np.logical_or.reduce(
+            [
+                route_map.get_agg_vismap(time, route_id="east")
+                for time in route_map.vismap_time_points
+            ]
         )
+        np.testing.assert_array_equal(np.isfinite(aset_map) & ~shown, ~ever_visible)
         plt.close(fig)
 
     def test_plot_vismap_invalid_combination(self, route_map):
