@@ -253,3 +253,47 @@ print(
     f"the last one after {route_aset.max():.0f} s."
 )
 ```
+
+## Migrating from 0.2 (waypoints) to 0.3 (signs and routes)
+
+Release 0.3.0 replaced the waypoints by safety signs and routes of egress: a **sign** has a position, a contrast
+factor and one viewing direction, its visibility map does not depend on any route. A **route** is a polyline of
+waypoints, starting at its first one, together with the signs that guide along it. The names of 0.2 still work
+since 0.3.2, forward to their replacements and emit a `DeprecationWarning` that names the replacement. They will
+be removed in 1.0.
+
+| fdsvismap 0.2 | fdsvismap 0.3 |
+|---|---|
+| `vis.set_waypoint(id, x, y, c, alpha)` | `vis.add_sign(id, x, y, c, alpha)` |
+| `vis.set_start_point(x, y)` | first waypoint of `vis.add_route(route_id, [(x, y), ...], signs=[...])` |
+| `vis.get_vismap(id, time)` | `vis.get_sign_vismap(id, time)` |
+| `vis.get_wp_agg_vismap(time)` | `vis.get_agg_vismap(time)`, or `vis.get_agg_vismap(time, route_id)` for one route |
+| `vis.get_time_agg_wp_agg_vismap(t_max)` | `vis.get_time_agg_vismap(t_max)` |
+| `vis.create_aset_map_plot(max_time, plot_obstructions, flip_y_axis)` | `vis.plot_aset_map(...)`, plus `ax`, `route_id`, `legend` |
+| `vis.create_time_agg_wp_agg_vismap_plot(t_max, plot_obstructions, flip_y_axis)` | `vis.plot_time_agg_vismap(...)`, plus `ax`, `route_id`, `legend` |
+| `vis.get_visibility_to_wp(time, x, y, id)` | `vis.get_visibility_to_sign(time, x, y, id)` |
+| `vis.wp_is_visible(time, x, y, id)` | `vis.sign_is_visible(time, x, y, id)` |
+| `vis.get_distance_to_wp(x, y, id)` | `vis.get_distance_to_sign(x, y, id)` |
+| `from fdsvismap.Waypoint import Waypoint` | `from fdsvismap import Sign` |
+| `vis.all_wp_dict`, `vis.all_wp_*_dict`, `vis.all_time_all_wp_vismap_array_list`, `vis.all_time_wp_agg_vismap_list` | `vis.all_sign_dict`, `vis.all_sign_*_dict`, `vis.all_time_all_sign_vismap_list`, `vis.all_time_sign_agg_vismap_list` |
+
+The aliases return the results of 0.3, which differ from 0.2 in these points:
+
+- `wp_is_visible` looked a waypoint up by its *position* in the order of insertion instead of its ID in 0.2, so
+  the IDs 1, 2, 3 returned the map of the next waypoint. The alias uses the ID.
+- `get_visibility_to_wp` ignored the viewing direction of the sign in 0.2. The alias takes it into account, as
+  the vismaps always did.
+- `get_aset_map` returns the times as floats (0.2: integers), so that time points with decimals are kept.
+- The plots use the style of 0.3 (`vis.style`, a `MapStyle`): a legend instead of a colorbar for the vismaps
+  and `viridis` for the ASET map. The deprecated time aggregated plot still draws the dashed line from the
+  start point through the waypoints.
+- The per-sign entries of `all_wp_ray_casting_cache_dict` have the memory saving layout of 0.3
+  (`ray_cells_flat_idx` and `ray_start_idx` instead of `ray_paths_x` and `ray_paths_y`).
+- Calling a getter before `compute_all()` raises a `RuntimeError` with a hint instead of a `KeyError`.
+
+Python shows a `DeprecationWarning` for code in a script or notebook by default. To find every use in a larger
+code base, turn the warnings into errors:
+
+```bash
+python -W "error::DeprecationWarning" my_script.py
+```
