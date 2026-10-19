@@ -699,6 +699,10 @@ class VisMap:
         """
         Get the array of mean extinction coefficients between the sign and all non-concealed cells.
 
+        The mean is the arithmetic mean of the cells on the line of sight, both end cells included and each with the
+        same weight (Eq. 9 in Börger et al., 2024, https://doi.org/10.1016/j.firesaf.2024.104269). It is not weighted
+        by the length of the line of sight inside each cell. See the description in the documentation.
+
         :param sign_id: ID of the sign for which to calculate the mean extinction coefficients.
         :type sign_id: int or str
         :param time: Time at which the extinction coefficients should be calculated.
@@ -966,6 +970,8 @@ class VisMap:
     def _get_visibility_array(self, sign_id: SignId, time: float) -> FloatArray:
         """
         Calculate the visibility array for a specific sign at a given time.
+
+        Applies Jin's law with the mean extinction coefficient along the line of sight, V = min(c / σ_mean, max_vis).
 
         :param sign_id: The ID of the sign for which the visibility map is to be calculated.
         :type sign_id: int or str
