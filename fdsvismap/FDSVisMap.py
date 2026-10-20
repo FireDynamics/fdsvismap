@@ -151,8 +151,10 @@ class VisMap:
     :vartype min_vis: float
     :ivar max_vis: Maximum visibility threshold. Initialized to 30.
     :vartype max_vis: float
-    :ivar fds_slc_height: Height at which the FDS slice is evaluated. Initialized as None.
-    :vartype fds_slc_height: float or None
+    :ivar fds_slc_height: Height at which the obstructions are evaluated. :meth:`read_fds_data` sets it to the height
+        of the slice that is read: the plane of a node-based slice, or the centre of the cells of a cell-centred
+        slice. Initialized to 2.
+    :vartype fds_slc_height: float
     :ivar background_image: Background image for the plot. Initialized as None.
     :vartype background_image: ndarray or None # TODO: Type?
     :ivar background_extent: Position of the background image as (x_min, x_max, y_min, y_max). If None, the image covers the simulation domain.
@@ -195,6 +197,7 @@ class VisMap:
         # ----------------------------------------------------
         self.fds_grid_shape: Optional[Tuple[int, int]] = None
         self.slc: Optional[fds.Simulation.Slice] = None
+        self._slice_is_optical_density: bool = False
         self.extent: np.ndarray = np.array([])
         self.all_y_coords: FloatArray = np.array([], dtype=float)
         self.all_x_coords: FloatArray = np.array([], dtype=float)
@@ -471,18 +474,25 @@ class VisMap:
 
         If defined, the relevant slice file is read by index or ID, otherwise by quantity as the horizontal
         slice closest to the given height.
+        The slice must be horizontal, and the name of its quantity must end with ``EXTINCTION COEFFICIENT`` or
+        ``OPTICAL DENSITY``, e.g. ``MY SMOKE EXTINCTION COEFFICIENT`` if smoke is a separate species. The quantity
+        of the slice decides whether it is an optical density, which is converted to the extinction coefficient.
+        ``quantity`` only selects the slice by height.
         The slice data itself is read on first access, see :meth:`get_extco_array_at_time`.
 
         :param sim_dir: Directory where FDS simulation data is stored
         :type sim_dir: object
         :param fds_slc_id: ID (name) of FDS slice file to be evaluated. Default is None.
         :type fds_slc_id: str
-        :param fds_slc_height: The height at which to evaluate visibility. Default is 2.
+        :param fds_slc_height: The height at which to evaluate visibility. The horizontal slice closest to it is
+            read, unless a slice is selected by index or ID. The obstructions are taken at the height of the slice that
+            is read, see :attr:`fds_slc_height`. Default is 2.
         :type fds_slc_height: float, optional
         :param fds_slc_index: Index of the slice in ``fdsreader.Simulation(sim_dir).slices``, as listed in the
             error message. Selects slices without an ID. Default is None.
         :type fds_slc_index: int, optional
-        :raises ValueError: If no matching slice is found. The message lists the available slices.
+        :raises ValueError: If no matching slice is found, or the selected slice is not horizontal or holds neither
+            an extinction coefficient nor an optical density. The message lists the available slices.
         """
         sim = fds.Simulation(sim_dir)
         if fds_slc_index is not None:
@@ -491,10 +501,10 @@ class VisMap:
                     f"No slice with index {fds_slc_index} in {sim_dir}. Select one of the available "
                     f"slices:\n{self._describe_slices(sim.slices)}"
                 )
-            self.slc = sim.slices[fds_slc_index]
+            slc = sim.slices[fds_slc_index]
             searched_slice = f"with index {fds_slc_index}"
         elif fds_slc_id:
-            self.slc = sim.slices.get_by_id(fds_slc_id)
+            slc = sim.slices.get_by_id(fds_slc_id)
             searched_slice = f"with ID {fds_slc_id!r}"
         else:
             if self.quantity in [
@@ -513,21 +523,37 @@ class VisMap:
                 fds_quantity = "SOOT OPTICAL DENSITY"
             else:
                 raise ValueError(f"Unsupported quantity: {self.quantity}")
-            self.slc = self._get_nearest_horizontal_slice(
+            slc = self._get_nearest_horizontal_slice(
                 sim.slices.filter_by_quantity(fds_quantity), fds_slc_height
             )
             searched_slice = f"with quantity {fds_quantity!r}"
-        if self.slc is None:
+        if slc is None:
             raise ValueError(
                 f"No slice {searched_slice} found in {sim_dir}. Select one of the available slices "
                 f"with fds_slc_index or fds_slc_id:\n{self._describe_slices(sim.slices)}"
             )
-        if fds_slc_index is not None or fds_slc_id:
-            logger.info(
-                "Slice %s was selected, its quantity is not checked and treated as %s.",
-                searched_slice,
-                self.quantity,
+        if slc.orientation != 3:
+            raise ValueError(
+                f"The slice {searched_slice} in {sim_dir} is not horizontal. Select a horizontal slice (PBZ) "
+                f"of the available slices:\n{self._describe_slices(sim.slices)}"
             )
+        # The name of the quantity ends with the FDS quantity, also if smoke is a separate species,
+        # e.g. MY SMOKE EXTINCTION COEFFICIENT
+        quantity_name = slc.quantity.name.upper()
+        if quantity_name.endswith("OPTICAL DENSITY"):
+            self._slice_is_optical_density = True
+        elif quantity_name.endswith("EXTINCTION COEFFICIENT"):
+            self._slice_is_optical_density = False
+        else:
+            raise ValueError(
+                f"The slice {searched_slice} in {sim_dir} holds {slc.quantity.name!r}, which is neither an "
+                f"extinction coefficient nor an optical density. Select one of the available slices:\n"
+                f"{self._describe_slices(sim.slices)}"
+            )
+        logger.info(
+            "Slice %s with quantity %r was selected.", searched_slice, slc.quantity.name
+        )
+        self.slc = slc
         self.extent = np.array(self.slc.extent._extents)
         self.all_x_coords = self.slc.get_coordinates()["x"]
         self.all_y_coords = self.slc.get_coordinates()["y"]
@@ -538,7 +564,7 @@ class VisMap:
         )
         self.fds_time_points = self.slc.times
         self.obstructions_collection = sim.obstructions
-        self.fds_slc_height = fds_slc_height
+        self.fds_slc_height = self._get_slice_cell_height(slc)
         self._slice_frames = {}
         # A real slice supersedes any synthetic field, so that
         # set_uniform_extco() followed by read_fds_data() uses the simulation
@@ -563,6 +589,30 @@ class VisMap:
         if not horizontal:
             return None
         return min(horizontal, key=lambda slc: abs(slc.extent.z_start - height))
+
+    @staticmethod
+    def _get_slice_cell_height(slc: Any) -> float:
+        """
+        Get the height of the values of a horizontal slice, at which the obstructions are evaluated.
+
+        A node-based slice holds the values on its plane. A cell-centred slice is reported at the upper face of the
+        cells whose values it holds, as FDS numbers the cell k between the faces k-1 and k. Its height is the centre
+        of these cells, so that an obstruction that starts at the reported face, e.g. the lintel above a door, does
+        not close the cells below.
+
+        :param slc: Horizontal slice of an FDS simulation.
+        :type slc: fdsreader.slcf.Slice
+        :return: Height in m.
+        :rtype: float
+        """
+        height = float(slc.extent.z_start)
+        if not slc.cell_centered:
+            return height
+        mesh_z = np.asarray(slc.subslices[0].mesh.coordinates["z"], dtype=float)
+        face_id = int(np.argmin(np.abs(mesh_z - height)))
+        if face_id == 0:
+            return height
+        return float((mesh_z[face_id - 1] + mesh_z[face_id]) / 2)
 
     @staticmethod
     def _describe_slices(slices: Iterable[Any]) -> str:
@@ -668,12 +718,8 @@ class VisMap:
 
         time_index = int(self.slc.get_nearest_timestep(time))
         extco_data = self._get_slice_frame(time_index).astype(np.float64)
-        if self.quantity in [
-            "OD_C",
-            "OD_C0.9H0.1",
-            "SOOT OPTICAL DENSITY",
-            "OPTICAL DENSITY",
-        ]:
+        # The quantity of the slice decides, as a slice selected by ID or index may differ from self.quantity
+        if self._slice_is_optical_density:
             extco_array: ExtCoArray = extco_data * np.log(10)
         else:
             extco_array = extco_data
@@ -778,7 +824,7 @@ class VisMap:
 
         Marks cells in the grid as obstructed based on the
         obstruction objects defined within the FDS simulation. It takes into account the height of the slice
-        (fds_slc_height) to determine if an obstruction at a given location blocks visibility.
+        (:attr:`fds_slc_height`) to determine if an obstruction at a given location blocks visibility.
 
         The rectangles of :meth:`add_visual_obstruction` and :meth:`add_visual_hole` are applied again
         afterwards, in the order in which they were added, so that a rebuild does not drop them.
