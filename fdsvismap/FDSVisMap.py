@@ -151,8 +151,10 @@ class VisMap:
     :vartype min_vis: float
     :ivar max_vis: Maximum visibility threshold. Initialized to 30.
     :vartype max_vis: float
-    :ivar fds_slc_height: Height at which the FDS slice is evaluated. Initialized as None.
-    :vartype fds_slc_height: float or None
+    :ivar fds_slc_height: Height at which the obstructions are evaluated. :meth:`read_fds_data` sets it to the height
+        of the slice that is read: the plane of a node-based slice, or the centre of the cells of a cell-centred
+        slice. Initialized to 2.
+    :vartype fds_slc_height: float
     :ivar background_image: Background image for the plot. Initialized as None.
     :vartype background_image: ndarray or None # TODO: Type?
     :ivar background_extent: Position of the background image as (x_min, x_max, y_min, y_max). If None, the image covers the simulation domain.
@@ -482,7 +484,9 @@ class VisMap:
         :type sim_dir: object
         :param fds_slc_id: ID (name) of FDS slice file to be evaluated. Default is None.
         :type fds_slc_id: str
-        :param fds_slc_height: The height at which to evaluate visibility. Default is 2.
+        :param fds_slc_height: The height at which to evaluate visibility. The horizontal slice closest to it is
+            read, unless a slice is selected by index or ID. The obstructions are taken at the height of the slice that
+            is read, see :attr:`fds_slc_height`. Default is 2.
         :type fds_slc_height: float, optional
         :param fds_slc_index: Index of the slice in ``fdsreader.Simulation(sim_dir).slices``, as listed in the
             error message. Selects slices without an ID. Default is None.
@@ -560,7 +564,7 @@ class VisMap:
         )
         self.fds_time_points = self.slc.times
         self.obstructions_collection = sim.obstructions
-        self.fds_slc_height = fds_slc_height
+        self.fds_slc_height = self._get_slice_cell_height(slc)
         self._slice_frames = {}
         # A real slice supersedes any synthetic field, so that
         # set_uniform_extco() followed by read_fds_data() uses the simulation
@@ -585,6 +589,30 @@ class VisMap:
         if not horizontal:
             return None
         return min(horizontal, key=lambda slc: abs(slc.extent.z_start - height))
+
+    @staticmethod
+    def _get_slice_cell_height(slc: Any) -> float:
+        """
+        Get the height of the values of a horizontal slice, at which the obstructions are evaluated.
+
+        A node-based slice holds the values on its plane. A cell-centred slice is reported at the upper face of the
+        cells whose values it holds, as FDS numbers the cell k between the faces k-1 and k. Its height is the centre
+        of these cells, so that an obstruction that starts at the reported face, e.g. the lintel above a door, does
+        not close the cells below.
+
+        :param slc: Horizontal slice of an FDS simulation.
+        :type slc: fdsreader.slcf.Slice
+        :return: Height in m.
+        :rtype: float
+        """
+        height = float(slc.extent.z_start)
+        if not slc.cell_centered:
+            return height
+        mesh_z = np.asarray(slc.subslices[0].mesh.coordinates["z"], dtype=float)
+        face_id = int(np.argmin(np.abs(mesh_z - height)))
+        if face_id == 0:
+            return height
+        return float((mesh_z[face_id - 1] + mesh_z[face_id]) / 2)
 
     @staticmethod
     def _describe_slices(slices: Iterable[Any]) -> str:
@@ -796,7 +824,7 @@ class VisMap:
 
         Marks cells in the grid as obstructed based on the
         obstruction objects defined within the FDS simulation. It takes into account the height of the slice
-        (fds_slc_height) to determine if an obstruction at a given location blocks visibility.
+        (:attr:`fds_slc_height`) to determine if an obstruction at a given location blocks visibility.
 
         The rectangles of :meth:`add_visual_obstruction` and :meth:`add_visual_hole` are applied again
         afterwards, in the order in which they were added, so that a rebuild does not drop them.

@@ -15,6 +15,7 @@ import pytest
 from fdsvismap import VisMap
 
 SIM_DIR = str(Path(__file__).parent / "data" / "slice_order")
+ROOM_FIRE = str(Path(__file__).parents[1] / "examples" / "room_fire" / "fds_data")
 
 
 def read(**kwargs):
@@ -85,9 +86,54 @@ def test_a_rejected_slice_keeps_the_slice_read_before():
     [("slcf_temperature", "TEMPERATURE"), ("slcf_visibility", "SOOT VISIBILITY")],
 )
 def test_a_slice_of_another_quantity_is_rejected(slc_id, quantity):
-    room_fire = Path(__file__).parents[1] / "examples" / "room_fire" / "fds_data"
     with pytest.raises(ValueError, match=f"holds '{quantity}', which is neither"):
-        VisMap().read_fds_data(str(room_fire), fds_slc_id=slc_id)
+        VisMap().read_fds_data(ROOM_FIRE, fds_slc_id=slc_id)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"fds_slc_index": 3},
+        {"fds_slc_index": 3, "fds_slc_height": 2.5},
+        {"fds_slc_height": 0.5},
+    ],
+)
+def test_obstructions_are_taken_at_the_centre_of_the_cells_of_the_slice(kwargs):
+    """The cell-centred slice reported at z = 0.75 m holds the cells from 0.5 to 0.75 m."""
+    assert read(**kwargs).fds_slc_height == pytest.approx(0.625)
+
+
+def obstructions(**kwargs):
+    vis = VisMap()
+    vis.read_fds_data(ROOM_FIRE, **kwargs)
+    return vis
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"fds_slc_height": 2.0},
+        {"fds_slc_height": 2.5},
+        {"fds_slc_id": "slcf_extinction_coefficient"},
+        {"fds_slc_id": "slcf_extinction_coefficient", "fds_slc_height": 2.5},
+    ],
+)
+def test_obstructions_follow_the_slice_not_the_requested_height(kwargs):
+    """
+    room_fire has one slice height: PBZ=2.0 on a 0.2 m grid, reported at z = 2.2 m, holding the cells from 2.0 to
+    2.2 m. The lintels above the doors start at 2.2 m, so the doors are open in the slice, also if 2.5 m is requested.
+    """
+    vis = obstructions(**kwargs)
+    assert vis.fds_slc_height == pytest.approx(2.1)
+    obstructed = vis.obstructions_array
+    x_id = np.argmin(np.abs(vis.all_x_coords - 9.9))
+    door_y_id = np.argmin(np.abs(vis.all_y_coords - 3.9))
+    wall_y_id = np.argmin(np.abs(vis.all_y_coords - 1.5))
+    assert not obstructed[door_y_id, x_id]
+    assert obstructed[wall_y_id, x_id]
+    np.testing.assert_array_equal(
+        obstructed, obstructions(fds_slc_height=2.0).obstructions_array
+    )
 
 
 def relabel(tmp_path, name, short_name):
