@@ -82,6 +82,7 @@ Or for optical density:
 - `CELL_CENTERED=T` writes the values at the cell centres, as in the examples of this repository.
 - In the FDS output, these quantities are named `SOOT EXTINCTION COEFFICIENT` and `SOOT OPTICAL DENSITY`. FDS does not accept these names in the input file.
 - If smoke is defined as a separate species (`SPEC_ID`), the quantity is named after the species, e.g. `MY SMOKE EXTINCTION COEFFICIENT`. Select such a slice by its ID with `fds_slc_id`, or by its index in `fdsreader.Simulation(sim_dir).slices` with `fds_slc_index` if it has no ID. The error message for a missing slice lists the slices with their index.
+- A slice selected by `fds_slc_id` or `fds_slc_index` must be horizontal, and the name of its quantity must end with `EXTINCTION COEFFICIENT` or `OPTICAL DENSITY`. Other slices are rejected with an error.
 
 ### Supported Quantities
 
@@ -92,7 +93,7 @@ Or for optical density:
 | `OD_C` | `SOOT OPTICAL DENSITY` |
 | `OD_C0.9H0.1` | `SOOT OPTICAL DENSITY` |
 
-You can set `vis.quantity` either to these Python-side names (recommended) or to the FDS quantity names (for example, `'EXTINCTION COEFFICIENT'`, `'SOOT EXTINCTION COEFFICIENT'`, `'OPTICAL DENSITY'` or `'SOOT OPTICAL DENSITY'`); all of them are accepted as aliases.
+You can set `vis.quantity` either to these Python-side names (recommended) or to the FDS quantity names (for example, `'EXTINCTION COEFFICIENT'`, `'SOOT EXTINCTION COEFFICIENT'`, `'OPTICAL DENSITY'` or `'SOOT OPTICAL DENSITY'`); all of them are accepted as aliases. `vis.quantity` selects the slice by height. For a slice selected by `fds_slc_id` or `fds_slc_index`, the quantity of the slice itself decides whether it is an optical density, which is converted to the extinction coefficient.
 
 ```python
 vis = VisMap()

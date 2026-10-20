@@ -1,11 +1,12 @@
 """
-Selection of the FDS slice by height and by index.
+Selection of the FDS slice by height, index and ID, and the checks of the selected slice.
 
 ``tests/data/slice_order`` holds unnamed slices of one quantity: a vertical
 slice through x = y = 0 first, then horizontal slices at z = 2.75, 1.75 and
 0.75 m, from top to bottom. The input is ``slice_order.fds`` in that folder.
 """
 
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -63,3 +64,66 @@ def test_index_takes_precedence_over_height():
 def test_invalid_index_lists_the_slices_with_their_index(index):
     with pytest.raises(ValueError, match=r"\[3\] \(no ID\).*z = 0\.75 m"):
         read(fds_slc_index=index)
+
+
+def test_a_vertical_slice_is_rejected():
+    with pytest.raises(
+        ValueError, match=r"(?s)not horizontal.*\[0\] \(no ID\).*y = 0\.00 m"
+    ):
+        read(fds_slc_index=0)
+
+
+def test_a_rejected_slice_keeps_the_slice_read_before():
+    vis = read(fds_slc_index=3)
+    with pytest.raises(ValueError):
+        vis.read_fds_data(SIM_DIR, fds_slc_index=0)
+    assert vis.slc.extent.z_start == pytest.approx(0.75)
+
+
+@pytest.mark.parametrize(
+    "slc_id, quantity",
+    [("slcf_temperature", "TEMPERATURE"), ("slcf_visibility", "SOOT VISIBILITY")],
+)
+def test_a_slice_of_another_quantity_is_rejected(slc_id, quantity):
+    room_fire = Path(__file__).parents[1] / "examples" / "room_fire" / "fds_data"
+    with pytest.raises(ValueError, match=f"holds '{quantity}', which is neither"):
+        VisMap().read_fds_data(str(room_fire), fds_slc_id=slc_id)
+
+
+def relabel(tmp_path, name, short_name):
+    """Copy the fixture and give its slices another quantity, with the same values."""
+    sim_dir = tmp_path / "slice_order"
+    shutil.copytree(SIM_DIR, sim_dir, ignore=shutil.ignore_patterns("*.pickle"))
+    smv = sim_dir / "slice_order.smv"
+    smv.write_text(
+        smv.read_text().replace(
+            " SOOT EXTINCTION COEFFICIENT\n ext_coef_C\n", f" {name}\n {short_name}\n"
+        )
+    )
+    return str(sim_dir)
+
+
+def test_optical_density_is_converted_however_the_slice_is_selected(tmp_path):
+    sim_dir = relabel(tmp_path, "SOOT OPTICAL DENSITY", "OD_C")
+    by_height = VisMap()
+    by_height.quantity = "OD_C"
+    by_height.read_fds_data(sim_dir, fds_slc_height=0.5)
+    by_index = VisMap()
+    by_index.read_fds_data(sim_dir, fds_slc_index=3)
+    extinction = read(fds_slc_index=3).get_extco_array_at_time(20.0)
+
+    assert by_height.slc.extent.z_start == by_index.slc.extent.z_start
+    for vis in (by_height, by_index):
+        np.testing.assert_allclose(
+            vis.get_extco_array_at_time(20.0), np.log(10) * extinction
+        )
+
+
+def test_a_smoke_species_is_read_as_extinction_coefficient(tmp_path):
+    sim_dir = relabel(tmp_path, "MY SMOKE EXTINCTION COEFFICIENT", "ext_coef_MY_SMOKE")
+    vis = VisMap()
+    vis.read_fds_data(sim_dir, fds_slc_index=3)
+    np.testing.assert_allclose(
+        vis.get_extco_array_at_time(20.0),
+        read(fds_slc_index=3).get_extco_array_at_time(20.0),
+    )
